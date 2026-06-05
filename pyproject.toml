@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "agent-fleet"
-version = "0.1.0"
+version = "0.2.0"
 description = "CI/CD pipeline + dashboard for AI coding agents (Claude Code, Cursor, Codex, etc.)"
 readme = "README.md"
 license = {text = "MIT"}

@@ -18,6 +18,7 @@ from datetime import datetime
 from . import storage, events
 from .adapters import get_adapter
 from .planners import get_planner
+from .sandbox import SubprocessSandbox
 
 
 # ---- Phase 0: Requirement Analysis ----
@@ -215,6 +216,8 @@ class AgentFleet:
         self.max_parallel = config.get("parallel_limit", 3)
         self.adapter = get_adapter(config)
         self.planner = get_planner(config, self.adapter)
+        sb_cfg = config.get("sandbox", {})
+        self.sandbox = SubprocessSandbox(timeout=sb_cfg.get("timeout_seconds", 30)) if sb_cfg.get("enabled", True) else None
         # Observability
         self.stats = {"tasks": 0, "retries": 0, "failures": {}, "durations": []}
 
@@ -346,6 +349,19 @@ class AgentFleet:
             f.write(f"# {task.get('name', tid)}\n\n{result.get('output', '')[:3000]}\n")
 
         self.stats["durations"].append(_time.time() - t_start)
+
+        # Sandbox verification for coder output
+        if self.sandbox and task_type == "code":
+            sb_result = self._run_sandbox(run_dir, td)
+            with open(os.path.join(td, "sandbox.json"), "w", encoding="utf-8") as f:
+                json.dump({"exit_code": sb_result.exit_code, "stdout": sb_result.stdout[:2000],
+                           "stderr": sb_result.stderr[:1000], "success": sb_result.success,
+                           "timed_out": sb_result.timed_out, "duration": sb_result.duration_seconds}, f)
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"\n[沙箱] exit={sb_result.exit_code} success={sb_result.success}\n")
+                if sb_result.stderr:
+                    f.write(f"[沙箱错误] {sb_result.stderr[:500]}\n")
+
         storage.update_status(run_dir,
             agents={tid: {"status": "done" if result["success"] else "failed"}})
         return result.get("success", False)
@@ -395,6 +411,20 @@ output.log with fewer than 5 lines = REJECTED.
 ## Working Directory: {self.work_dir}
 ## Output Directory: {os.path.join(run_dir, tid)}"""
 
+    def _run_sandbox(self, run_dir, task_dir):
+        """Run generated Python files in sandbox and return result."""
+        from .sandbox import SandboxResult
+        py_files = []
+        for root, _, files in os.walk(self.work_dir):
+            if ".fleet" in root:
+                continue
+            for fn in files:
+                if fn.endswith(".py"):
+                    py_files.append(os.path.join(root, fn))
+        if py_files:
+            return self.sandbox.run_script(py_files[0])
+        return SandboxResult()
+
     def _check_acceptance(self, run_dir) -> bool:
         """Check acceptance-report.md for explicit pass verdict."""
         for item in os.listdir(run_dir):
@@ -407,10 +437,10 @@ output.log with fewer than 5 lines = REJECTED.
             try:
                 with open(rf, "r", encoding="utf-8") as f:
                     text = f.read().lower()
-                # JSON-only verdict detection
+                # JSON-only verdict detection (case-insensitive for True/False)
                 import re
-                m = re.search(r'"(?:pass|通过|通过验收)"\s*:\s*(true|false)', text)
-                return bool(m) and m.group(1) == "true"
+                m = re.search(r'(?i)"(?:pass|通过|通过验收)"\s*:\s*(true|false)', text)
+                return bool(m) and m.group(1).lower() == "true"
             except Exception:
                 return False
         return False

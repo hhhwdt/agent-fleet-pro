@@ -21,6 +21,7 @@ def load_config():
 if __name__ == "__main__":
     config = load_config()
     port = config.get("port", 8765)
-    print(f"Agent Fleet v0.1.0")
+    from agent_fleet import __version__
+    print(f"Agent Fleet v{__version__}")
     print(f"Dashboard: http://127.0.0.1:{port}")
     start_server(config)

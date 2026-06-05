@@ -120,14 +120,16 @@ def update_status(run_dir, **kwargs):
 
 
 def append_log(run_dir, *lines):
-    """Append lines to progress.log."""
+    """Append lines to progress.log (thread-safe)."""
     lf = os.path.join(run_dir, "progress.log")
-    try:
-        with open(lf, "a", encoding="utf-8") as f:
-            for line in lines:
-                f.write(line + "\n")
-    except IOError as e:
-        logger.error("Failed to write progress.log: %s", e)
+    lock = _get_lock(lf)
+    with lock:
+        try:
+            with open(lf, "a", encoding="utf-8") as f:
+                for line in lines:
+                    f.write(line + "\n")
+        except IOError as e:
+            logger.error("Failed to write progress.log: %s", e)
 
 
 def phase_start(run_dir, phase):

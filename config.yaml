@@ -22,6 +22,11 @@ max_coding_rounds: 10
 agent_timeout_seconds: 300
 parallel_limit: 3
 
+# Sandbox — execute agent code to verify it actually runs
+sandbox:
+  enabled: true
+  timeout_seconds: 30
+
 # ============================================================
 # Storage backend (future):
 #   files  - default, everything in .fleet/ (simple, human-readable)

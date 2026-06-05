@@ -6,7 +6,7 @@ Usage:
     fleet.run("Build a blog system")
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .engine import AgentFleet, decomposition_prompt, init_pipeline, generate_report
 from .adapters import BaseAgentAdapter, SubprocessAdapter, MockAdapter, get_adapter

@@ -7,13 +7,15 @@ from ..events import get_task_status, get_task_errors
 
 TEMPLATE_DIR = None  # Set by server.py
 
-def _safe(value: str, base_dir: str = None) -> str:
-    """Validate path: realpath resolution blocks all traversal tricks."""
+def _safe(value: str, base_dir: str) -> str:
+    """Validate path: normpath + realpath + reject .. segments."""
     value = value.replace("\\", "/")
+    # Reject any path segment that is exactly ".."
+    for seg in value.split("/"):
+        if seg == "..":
+            return ""
     value = re.sub(r"[^a-zA-Z0-9\-_./]", "", value)
-    if not base_dir:
-        return value  # legacy calls without base_dir
-    full = os.path.realpath(os.path.join(base_dir, value))
+    full = os.path.realpath(os.path.join(base_dir, os.path.normpath(value)))
     real_base = os.path.realpath(base_dir)
     if not full.startswith(real_base + os.sep) and full != real_base:
         return ""
@@ -141,7 +143,20 @@ def register_routes(app):
                     except Exception: pass
         return jsonify({"run": run_id, "changes": changes})
 
-    @app.route("/api/fleet-runs/delete", methods=["POST"])
+    @app.route("/api/fleet-task-sandbox")
+def api_fleet_task_sandbox():
+    run_id = _safe(request.args.get("run", ""), app.config["WORK_DIR"])
+    task_id = _safe(request.args.get("task", ""), app.config["WORK_DIR"])
+    sf = os.path.join(app.config["WORK_DIR"], app.config["FLEET_DIR"], run_id, task_id, "sandbox.json")
+    if os.path.exists(sf):
+        try:
+            with open(sf, "r", encoding="utf-8") as f:
+                return jsonify({"run": run_id, "task": task_id, "sandbox": json.load(f)})
+        except (IOError, json.JSONDecodeError): pass
+    return jsonify({"run": run_id, "task": task_id, "sandbox": None})
+
+
+@app.route("/api/fleet-runs/delete", methods=["POST"])
     def api_fleet_runs_delete():
         data = request.get_json() or {}
         run_id = _safe(data.get("run", ""))
