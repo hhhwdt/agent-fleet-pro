@@ -28,12 +28,12 @@ Dashboard: `python D:\clauld_code_work\agent-fleet-pro\run.py` → http://localh
 1. 分析 → Phase 0 总是执行，扫代码结构 + 写分析报告
 2. 拆分 → Agent 拆成 code/test/accept → 写 plan.json / status.json / roles/*.md
    {新建项目: CODE_DIR = workspace/<RUN_ID>/，改动已有: CODE_DIR = 当前目录}
-3. 编码 → Agent(bg) x N 并发 → 检查: output.log>=5行 + [思考][分析][行动][结果]各>=1 + result.md
-4. 测试 → Agent(bg) → 读 test-report.md → 失败？通知 coder → 回到 3
-5. 验收 → Agent(bg) → 读 acceptance-report.md → 不通过+round<5？回到 3
+3. 编码 → Agent(bg) x N → 检查: result.md≥800B + bash代码块 + output.log≥10行
+4. 测试 → Agent(bg) → 只给需求不給代码 → test-report.md≥1500B + bash代码块 + PASS/FAIL
+5. 验收 → Agent(bg) → 逐条执行验收标准 → 交叉验证 tester 覆盖
 6. 汇总 → Agent(bg) → FINAL_REPORT.md → 检查 6 项质量
 
-铁律: 编排器不写代码/不测试/不验收 | 每阶段独立Agent | 每阶段完执行 ls 验证文件 | 占位符全替换
+铁律: 编排器不写代码/不测试/不验收 | 每阶段独立Agent | 内容检查替代格式检查 | 累进惩罚最多2次
 ```
 
 ---
@@ -153,11 +153,20 @@ Phase 6: 汇总 → FINAL_REPORT.md
 {分析报告内容}
 基于以上分析报告拆分。
 
-返回 JSON（只返回 JSON）：
+返回 JSON（只返回 JSON）。acceptance_criteria 必须是具体用例，不是空洞描述：
+
 {
   "summary": "概述",
-  "acceptance_criteria": ["可验证标准1", "标准2"],
+  "acceptance_criteria": [
+    {"id": "ac-1", "描述": "正常输入得到预期结果", "输入": "具体输入值", "期望": "具体期望输出"},
+    {"id": "ac-2", "描述": "边界条件处理", "输入": "空值/0/-1", "期望": "明确的错误信息或处理方式"}
+  ],
   "tasks": [
+
+验收标准规则：
+- 每条必须是「给定输入 → 期望输出」的具体用例
+- 禁止: "代码没有错误" "功能正常" "满足需求" "代码可运行"
+- 标准: 让一个不懂编程的人拿输入去调用、对照期望输出，就能判断过没过
     {"id": "coder-01", "type": "code", "name": "模块", "responsibility": "负责什么", "expected_files": [], "depends_on": []},
     {"id": "tester-01", "type": "test", "name": "测试", "responsibility": "测什么", "expected_files": [], "depends_on": ["coder-01"]},
     {"id": "acceptor-01", "type": "acceptance", "name": "验收", "responsibility": "逐项验收", "expected_files": [], "depends_on": ["tester-01"]}
@@ -166,9 +175,9 @@ Phase 6: 汇总 → FINAL_REPORT.md
 ```
 
 3. 写角色文件 `<RUN_DIR>/roles/<id>.md`，**占位符必须替换为实际值**：
-   - code: "你是 {name}，负责 {responsibility}。只写代码不写测试。所有输出用中文。\n代码目录: <CODE_DIR> (新建项目需先 mkdir)\n管道目录: <RUN_DIR>/{id}/"
-   - test: "你是 {name}，负责 {responsibility}。必须实际运行测试粘贴真实输出。测试报告用中文。不修改实现代码。\n代码目录: <CODE_DIR> (新建项目需先 mkdir)\n管道目录: <RUN_DIR>/{id}/"
-   - acceptance: "你是验收员。\n验收标准:\n1. {实际标准1}\n2. {实际标准2}\n...\n逐项检查必须实际运行。报告用中文。\n代码目录: <CODE_DIR> (新建项目需先 mkdir)\n管道目录: <RUN_DIR>/{id}/"
+   - code: "你是 {name}，负责 {responsibility}。只写代码不写测试。写完必须用 Bash 实际运行，贴终端输出到 result.md。\n代码目录: <CODE_DIR> (新建项目需先 mkdir)\n管道目录: <RUN_DIR>/{id}/"
+   - test: "你是 {name}，负责 {responsibility}。你只能拿到需求规格和接口签名，不能看实现代码。测试必须覆盖边界值/异常输入/组合场景。实际运行测试贴终端输出。\n代码目录: <CODE_DIR>\n管道目录: <RUN_DIR>/{id}/"
+   - acceptance: "你是验收员。不信任 coder 也不信任 tester，只对验收标准负责。逐条独立运行验证，贴终端输出为证据。acceptance-report.md 末尾写 VERDICT: PASS/FAIL。\n验收标准:\n{criteria_text}\n代码目录: <CODE_DIR>\n管道目录: <RUN_DIR>/{id}/"
 
 4. 写 plan.json（flat tasks 数组，每条含 id/type/name/depends_on）
 
@@ -193,27 +202,30 @@ Phase 6: 汇总 → FINAL_REPORT.md
 
 **Phase 2 完成后执行：**
 ```bash
-# 列出所有 coder 目录下的产出（prompt.md 也应存在）
-ls <RUN_DIR>/coder-*/{prompt.md,output.log,result.md} 2>&1
-# 期望：每个 coder 都有这三个文件。有缺失 → 立即重派该 coder
+ls <RUN_DIR>/coder-*/{prompt.md,output.log,result.md} 2>&1  # 文件存在
+wc -c <RUN_DIR>/coder-*/result.md | awk '$1<800{print "FAIL: too small"}'  # ≥800B
+grep -c '```bash' <RUN_DIR>/coder-*/result.md | awk '$1==0{print "FAIL: no bash"}'  # 有终端输出
+wc -l <RUN_DIR>/coder-*/output.log | awk '$1<10{print "FAIL: log too short"}'  # ≥10行
 ```
 
 **Phase 3 完成后执行：**
 ```bash
 ls <RUN_DIR>/tester-*/{prompt.md,output.log,test-report.md} 2>&1
-# 期望：每个 tester 都有这三个文件。有缺失 → 立即重派该 tester
+wc -c <RUN_DIR>/tester-*/test-report.md | awk '$1<1500{print "FAIL: too small"}'
+grep -c '```bash' <RUN_DIR>/tester-*/test-report.md | awk '$1==0{print "FAIL: no bash"}'
+grep -cE 'PASS|FAIL|✅|❌' <RUN_DIR>/tester-*/test-report.md | awk '$1==0{print "FAIL: no verdict"}'
 ```
 
 **Phase 4 完成后执行：**
 ```bash
 ls <RUN_DIR>/acceptor-*/{prompt.md,output.log,acceptance-report.md} 2>&1
-# 期望：acceptor 有这三个文件。有缺失 → 立即重派 acceptor
+wc -c <RUN_DIR>/acceptor-*/acceptance-report.md | awk '$1<2000{print "FAIL: too small"}'
+# 验收标准N条 → grep ✅/❌ 数量应≥N
 ```
 
 **Phase 6 完成后执行：**
 ```bash
-ls -la <RUN_DIR>/FINAL_REPORT.md
-# 期望：文件存在且 >500 bytes
+ls -la <RUN_DIR>/FINAL_REPORT.md  # 存在 + ≥500B
 ```
 
 **验证 FAIL 的标准处理：**
@@ -253,11 +265,27 @@ output.log 少于 5 行 = 失败！
 2. output.log: [开始] 第{round}轮: {id}
 3. 分析需求 -> [思考] -> [分析]
 4. 写代码，每步写 [行动] 和 [结果]
-5. 写入 result.md
-6. output.log: [完成] 第{round}轮: {id}
+5. **自检（不可跳过）**：用 Bash 实际运行你写的代码
+   - Python: python <入口文件>，Go: go run .，Node: node <入口文件>
+   - 报错 → 修复 → 再运行 → 直到无报错
+6. result.md 必须包含：
+   - 文件清单
+   - **自检运行结果**（```bash 代码块，粘贴真实终端输出，禁止总结）
+   - 没有 bash 代码块 → 编排器直接打回
+7. output.log: [完成] 第{round}轮: {id}
 ```
 
-4. `TaskOutput` 等待完成。检查 output.log < 5 行 → 日志不合格
+4. `TaskOutput` 等待完成。
+5. 阶段关卡检查（硬性）：
+   - `ls` 确认 prompt.md/output.log/result.md 都存在
+   - `wc -c result.md` → < 800 bytes → 打回
+   - `grep -c '```bash' result.md` → = 0 → 打回（没贴终端输出）
+   - output.log < 10 行 → 打回
+
+**累进惩罚**：每个 agent 最多重试 2 次：
+- 第1次打回 → prompt 加「上次产出被打回。原因：{具体问题}。这次必须达标。」
+- 第2次打回 → 「第二次被打回。最后机会。还不达标 → 标记 FAILED。」
+- 第3次不达标 → 标记 failed，继续流程，不阻塞其他 agent
 
 ## Phase 3: 并行测试
 
@@ -275,34 +303,44 @@ output.log 少于 5 行 = 失败！
 
 ## 当前: 第 {round} 轮测试
 
-## 依赖的编码模块
-你必须先读取以下文件了解接口，否则不知道该怎么测：
-- <RUN_DIR>/coder-01/result.md
-- <RUN_DIR>/coder-02/result.md
-（列出所有 depends_on 中 coder 的 result.md 完整路径）
+## 你能拿到的信息（只给这些）
+需求描述：{任务描述}
+接口签名：{从 plan.json 提取的函数/类名/方法签名}
+验收标准：{逐条具体输入→期望输出}
 
-{第1轮} 编写测试并运行。
-{后续轮} 上一轮测试有 N 个失败，相关 coder 已修复。重新运行全部测试确认。
-上次失败的用例和修复建议：（粘贴 test-report.md 中的失败详情）
+## 你不能拿到的
+- 任何 coder 的 result.md（你不知道实现内部做了什么）
+- 你的测试依据是需求规格，不是实现代码
+
+## 你必须测的
+- 验收标准里每条用例 → 直接翻译成测试
+- 边界值（0, -1, 空, 最大值）、异常输入（类型错误, None）、组合场景
+
+{后续轮} 上一轮测试有 N 个失败。上次失败详情：（粘贴 test-report.md 中的失败用例）
 
 ## 代码目录: <CODE_DIR>
-  {新建项目 → 需先 mkdir，改动已有 → 直接修改}
-## 管道目录（日志/报告）: <RUN_DIR>/{id}/
+## 管道目录: <RUN_DIR>/{id}/
 
 ## 执行步骤
-1. 创建 <RUN_DIR>/{id}/ 目录
+1. 创建目录
 2. output.log: [开始] 第{round}轮: {id}
-3. 读依赖模块代码了解接口 → [思考] [分析]
+3. 根据需求规格设计测试用例 → [思考] [分析]
 4. 编写测试代码 → [行动]
-5. 运行测试 → [结果] 粘贴真实输出！
-6. 写入 test-report.md（测试用例表、通过/失败、失败分析）
+5. **实际运行测试** → [结果] 粘贴真实终端输出（```bash 代码块）
+6. 写入 test-report.md：
+   - 测试用例表（编号|场景|输入|期望|实际|结果）
+   - 失败根因分析（不是「没通过」，是「为什么没通过」）
+   - 完整终端输出（```bash 代码块）
 7. output.log: [完成] 第{round}轮: {id}
 ```
 
-3. 用 `TaskOutput` 等待完成。检查 output.log < 5 行 → 不合格。
-4. 主 agent 读 test-report.md：
-   - 全部通过 → Phase 4
-   - 有失败 → 通知对应 coder（传入失败详情+修复建议）→ 回到 Phase 2
+3. `TaskOutput` 等待完成。
+4. 阶段关卡（硬性）：
+   - `ls` 确认 prompt.md/output.log/test-report.md 都存在
+   - `wc -c test-report.md` → < 1500 bytes → 打回
+   - `grep -c '```bash' test-report.md` → = 0 → 打回（没贴终端输出）
+   - `grep -cE 'PASS|FAIL|✅|❌' test-report.md` → = 0 → 打回（没判定结果）
+5. 读 test-report.md：全部通过 → Phase 4 / 有失败 → 通知对应 coder → 回到 Phase 2
 
 ## Phase 4: 验收（必须启动独立 Agent，编排器不得自己验收）
 
@@ -327,44 +365,55 @@ output.log 少于 5 行 = 失败！
 
 ## 当前: 第 {round} 轮验收（最多 5 轮）
 
-## 验收标准（必须逐条检查）
-（此处列出 plan.json 中的 acceptance_criteria 完整列表）
+## 你的立场
+你不站在 coder 一边，也不站在 tester 一边。你只对下面的验收标准负责。
 
-## 编码产出
-先读取以下文件了解实现：
-- <RUN_DIR>/coder-01/result.md
-- <RUN_DIR>/coder-02/result.md
-（列出所有 coder 的 result.md 完整路径）
+## 验收标准（逐条独立验证）
+{逐条列出 plan.json 中的验收用例（id、描述、输入、期望）}
 
-## 测试报告
-先读取以下文件了解测试结果：
-- <RUN_DIR>/tester-01/test-report.md
-（列出所有 tester 的 test-report.md 完整路径）
+## 验收方式：逐条执行
+对每条验收标准：
+1. 拿到 coder 的代码，用 Bash 实际运行
+2. 用验收标准里指定的输入去调用
+3. 把实际输出和期望输出逐字对比
+4. 记录：✅ 一致 或 ❌ 不一致 + 贴出实际输出
 
-{第1轮} 这是第一轮验收。
-{后续轮} 上一轮验收不通过项和修复建议：
-（粘贴 acceptance-report.md 中的不通过项表格）
-相关 agent 已完成修复，请重新逐条验收。
+## 还要检查
+- 代码能直接跑吗？（不能 → ❌）
+- 有需求没要求但代码多做的功能吗？（过度实现）
+- 有需求要求但代码完全没做的吗？（漏实现）
+- tester 的 test-report.md 覆盖了所有验收标准吗？（对照计数：验收N条，test-report覆盖M条）
 
-## 代码目录: <CODE_DIR>
-  {新建项目 → 需先 mkdir，改动已有 → 直接修改}
-## 管道目录（日志/报告）: <RUN_DIR>/{id}/
+## 禁止
+❌ 因为测试都通过就判通过 ❌ 跳过验收标准 ❌ 写模糊结论 ❌ 不实际运行就写验收
 
 ## 执行步骤
-1. 创建 <RUN_DIR>/{id}/ 目录
+1. 创建目录
 2. output.log: [开始] 第{round}轮验收: {id}
-3. 阅读编码产出和测试报告 → [思考] [分析]
-4. 逐项对照验收标准检查 → 每项写 [行动] 和 [结果]
-5. 必须实际运行项目！→ [结果] 粘贴运行输出
-6. 写入 acceptance-report.md（逐条 ✅/❌ + 证据 + 修复建议）
-7. output.log: [完成] 第{round}轮验收: {id}
-```
+3. 读 coder 的 result.md 和 tester 的 test-report.md → [思考]
+4. **逐条执行验收标准** → 每项 [行动] 和 [结果]
+5. 写入 acceptance-report.md：
+   格式: ac-N: {描述} | 输入: {值} | 期望: {值} | 实际: {终端输出} | ✅/❌
+   末尾必须: VERDICT: PASS 或 VERDICT: FAIL + 通过N条/失败M条
+6. output.log: [完成]
 
-3. 用 `TaskOutput` 等待完成。检查 output.log < 5 行 → 不合格。
-4. 主 agent 读报告：
-   - 通过 → Phase 6
-   - 不通过 + round < 5 → 通知 agent 修复 → round++ → Phase 2 → Phase 3 → Phase 4
-   - 不通过 + round >= 5 → Phase 5
+## 阶段关卡（硬性）
+- `wc -c acceptance-report.md` → < 2000 bytes → 打回
+- 验收标准N条，`grep -c '✅\|❌'` → < N → 打回（没逐条）
+
+## 交叉验证（编排器在 Phase 4 后执行）
+- 读 acceptance-report.md，提取所有 ❌ 条目
+- 读 tester 的 test-report.md
+- 如果 acceptor 发现 ≥ 2 个错误且 tester 完全没覆盖 → tester 也打回重跑
+  理由：「acceptor 独立运行时发现 X 个错误，你的测试没有覆盖」
+
+## 修复轮规则（编排器执行）
+验收不通过时：
+- 读 acceptance-report.md 的 ❌ 条目
+- 追溯：是哪个 coder 的模块有问题？→ 只重置该 coder
+- 对应的 tester 没测出来？→ 也重置
+- 通过的模块不动
+- 重跑时 prompt 注入：`你上一轮的问题: {粘贴 ❌ 条目和实际输出}`
 
 ## Phase 5: 强制结束
 

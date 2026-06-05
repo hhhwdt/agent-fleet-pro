@@ -19,8 +19,12 @@ class TemplatePlanner(BasePlanner):
         return {
             "summary": task[:80],
             "acceptance_criteria": [
-                "Code runs without errors",
-                "Meets the stated requirements"
+                {"id": "ac-1", "description": "核心功能正常执行",
+                 "verify": f"输入: 正常调用 {task[:30]}\n期望: 返回预期结果，无异常"},
+                {"id": "ac-2", "description": "边界输入处理",
+                 "verify": "输入: 空值/0/-1/超长字符串\n期望: 不会崩溃，返回明确错误信息"},
+                {"id": "ac-3", "description": "错误输入有提示",
+                 "verify": "输入: 类型错误/None/非法格式\n期望: 返回错误信息，不静默吞错"},
             ],
             "tasks": [
                 {"id": "coder-01", "type": "code", "name": "Main Implementation",
@@ -59,7 +63,10 @@ Rules:
 Return ONLY valid JSON:
 {{
   "summary": "one-line summary",
-  "acceptance_criteria": ["criterion 1", "criterion 2"],
+  "acceptance_criteria": [
+    {{"id": "ac-1", "description": "specific scenario", "verify": "Input: xxx. Expected: yyy"}},
+    {{"id": "ac-2", "description": "edge case", "verify": "Input: empty/zero. Expected: graceful error"}}
+  ],
   "tasks": [
     {{"id": "coder-01", "type": "code", "name": "Name", "responsibility": "What to build", "expected_files": [], "depends_on": []}},
     {{"id": "tester-01", "type": "test", "name": "Name", "responsibility": "What to test", "expected_files": [], "depends_on": ["coder-01"]}},

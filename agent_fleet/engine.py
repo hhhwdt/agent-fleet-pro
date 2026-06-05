@@ -177,21 +177,33 @@ def init_pipeline(work_dir: str, fleet_dir: str, task: str,
                 f"# Role: {t['name']}\n\n"
                 f"## Responsibility\n{t.get('responsibility', '')}\n\n"
                 f"## Rules\n- Only write implementation code, do not write tests\n"
-                f"- Ensure code is runnable\n- Write all output in English or Chinese consistently\n"
+                f"- Ensure code is runnable\n- Output a main entry point that can be executed\n"
             )
         elif tp == "test":
+            # Tester does NOT see implementation code — only requirements + interface
             content = (
                 f"# Role: {t['name']}\n\n"
                 f"## Responsibility\n{t.get('responsibility', '')}\n\n"
-                f"## Rules\n- Run tests and paste real output\n"
-                f"- Analyze root cause of failures\n- Do NOT modify implementation code\n"
+                f"## CRITICAL RULES\n"
+                f"- You CANNOT see the implementation code. You only see requirements below.\n"
+                f"- Write tests that CHALLENGE the code, not tests that fit the code.\n"
+                f"- Cover: happy path, edge cases (0/-1/empty), invalid input, combinations.\n"
+                f"- Run tests and paste REAL output. Do NOT modify implementation code.\n"
+                f"- Write test-report.md with test case table and pass/fail per case.\n"
             )
         else:
+            # Acceptor checks independently — doesn't trust coder or tester
             content = (
                 f"# Role: Acceptance Reviewer\n\n"
-                f"## Acceptance Criteria\n{criteria_text}\n\n"
-                f"## Rules\n- Check each criterion, provide evidence\n"
-                f"- Must actually run the project\n- Report pass/fail per criterion\n"
+                f"## Acceptance Criteria (check EVERY item below)\n{criteria_text}\n\n"
+                f"## CRITICAL RULES\n"
+                f"- You answer to REQUIREMENTS only — not to the coder, not to the tester.\n"
+                f"- For EACH criterion: actually run the code, get real output, compare.\n"
+                f"- Output: acceptance-report.md with table: | # | Criterion | Expected | Actual | Pass? | Evidence |\n"
+                f"- Also check: did coder add features NOT in requirements? (over-implementation)\n"
+                f"- Also check: did coder MISS any requirement? (under-implementation)\n"
+                f"- Verdict must include JSON: {{\"pass\": true/false, \"evidence\": [...]}}\n"
+                f"- Do NOT pass just because tests passed. Verify against requirements.\n"
             )
 
         path = os.path.join(meta["roles_dir"], f"{t['id']}.md")
@@ -251,7 +263,10 @@ class AgentFleet:
             if rnd < self.max_accept:
                 storage.append_log(run_dir, f"[验收] 第{rnd}轮: 不通过，进入修复")
                 self.stats["retries"] += 1
-                # Fix round: re-dispatch ALL coders and testers (ignore previous done)
+                # Fix round: remove code/test tasks from done so they re-run
+                code_ids = {t["id"] for t in tasks if t.get("type") == "code"}
+                test_ids = {t["id"] for t in tasks if t.get("type") == "test"}
+                done -= code_ids | test_ids
                 done = self._dispatch_type("code", tasks, run_dir)
                 done = self._dispatch_type("test", tasks, run_dir, done)
             else:
@@ -376,6 +391,18 @@ class AgentFleet:
             with open(role_file, "r", encoding="utf-8") as f:
                 body = f.read()
 
+        # Inject previous sandbox errors if this is a fix round
+        sandbox_context = ""
+        sb_file = os.path.join(run_dir, tid, "sandbox.json")
+        if os.path.exists(sb_file):
+            try:
+                import json as _j
+                sb = _j.load(open(sb_file, "r", encoding="utf-8"))
+                if not sb.get("success", True):
+                    sandbox_context = f"\n## Previous Runtime Errors (fix these)\n{sb.get('stderr', '')[:1000]}\n"
+            except Exception:
+                pass
+
         # Read acceptance criteria from plan.json
         criteria = ""
         pf = os.path.join(run_dir, "plan.json")
@@ -408,6 +435,7 @@ output.log with fewer than 5 lines = REJECTED.
 ## Acceptance Criteria
 {criteria if criteria else 'See plan.json'}
 
+{sandbox_context}
 ## Working Directory: {self.work_dir}
 ## Output Directory: {os.path.join(run_dir, tid)}"""
 
