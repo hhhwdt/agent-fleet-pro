@@ -153,8 +153,12 @@ Phase 6: 汇总 → FINAL_REPORT.md
 {分析报告内容}
 基于以上分析报告拆分。
 
-返回 JSON（只返回 JSON）。acceptance_criteria 必须是具体用例，不是空洞描述：
+验收标准规则（拆分前先读）：
+- 每条必须是「给定输入 → 期望输出」的具体用例
+- 禁止: "代码没有错误" "功能正常" "满足需求" "代码可运行"
+- 标准: 让一个不懂编程的人拿输入去调用、对照期望输出，就能判断过没过
 
+返回 JSON（只返回 JSON）：
 {
   "summary": "概述",
   "acceptance_criteria": [
@@ -162,11 +166,6 @@ Phase 6: 汇总 → FINAL_REPORT.md
     {"id": "ac-2", "描述": "边界条件处理", "输入": "空值/0/-1", "期望": "明确的错误信息或处理方式"}
   ],
   "tasks": [
-
-验收标准规则：
-- 每条必须是「给定输入 → 期望输出」的具体用例
-- 禁止: "代码没有错误" "功能正常" "满足需求" "代码可运行"
-- 标准: 让一个不懂编程的人拿输入去调用、对照期望输出，就能判断过没过
     {"id": "coder-01", "type": "code", "name": "模块", "responsibility": "负责什么", "expected_files": [], "depends_on": []},
     {"id": "tester-01", "type": "test", "name": "测试", "responsibility": "测什么", "expected_files": [], "depends_on": ["coder-01"]},
     {"id": "acceptor-01", "type": "acceptance", "name": "验收", "responsibility": "逐项验收", "expected_files": [], "depends_on": ["tester-01"]}
