@@ -47,6 +47,22 @@ Dashboard: `python D:\clauld_code_work\agent-fleet-pro\run.py` → http://localh
 
 判断标准：任务是否包含「改/修/优化/重构」等词 → 改动已有项目；否则 → 新建项目。
 
+## 用法
+
+```
+/agent-fleet-pro 做一个计算器
+/agent-fleet-pro --acceptance ./specs/cases.md 做登录功能    ← 用户提供验收标准（推荐）
+/agent-fleet-pro --topology security-audit 做支付模块         ← 自定义拓扑
+/agent-fleet-pro ./docs/需求.md                              ← 需求文档
+```
+
+参数说明：
+- `--acceptance <文件>`：读取该文件作为验收标准，跳过 LLM 生成
+- `--topology <名称>`：使用 `topologies/<名称>.yaml` 定义的自定义流水线
+- 不带参数：默认 code→test→accept 三阶段
+
+内置拓扑：`review-first`（编码→审查→测试→验收）、`security-audit`（编码→安全审计→修复→测试→验收）、`pair-programming`（双方案并行→对比→测试→验收）
+
 ## 执行流程
 
 ```
@@ -142,7 +158,25 @@ Phase 6: 汇总 → FINAL_REPORT.md
 
    **防僵尸目录**：mkdir 之后立刻 `ls <FLEET_DIR>/run-/`，存在则 `rm -rf`。
 
-2. 用 Agent 拆分任务：
+2. 处理拓扑：
+   ```
+   如果用户传了 --topology <名称>:
+     用 Read 读取 topologies/<名称>.yaml → 按 stages 生成 tasks 数组
+     每个 stage: id、parallel、count、depends_on、role（角色 prompt 模板）
+     不需要再走拆分 Agent
+   否则:
+     正常走拆分 Agent（下一步）
+   ```
+
+3. 处理验收标准：
+   ```
+   如果用户传了 --acceptance <文件>:
+     Read 读取 → 直接作为 acceptance_criteria
+   否则:
+     LLM 生成验收标准（在拆分 Agent 中）
+   ```
+
+4. 用 Agent 拆分任务（无 --topology 时）：
 ```
 你是任务拆分专家。将以下任务拆分为 code/test/acceptance 三类。
 
@@ -238,8 +272,8 @@ ls -la <RUN_DIR>/FINAL_REPORT.md  # 存在 + ≥500B
 ## Phase 2: 并行编码
 
 1. 找出 `type=code` 且 depends_on 全满足的就绪任务
-2. **存档 prompt.md（不可跳过）**：每个 agent 派发前，先用 Write 工具把完整 prompt 写入 `<RUN_DIR>/<id>/prompt.md`。派发后 Agent 返回时执行 `ls <RUN_DIR>/<id>/prompt.md` 确认存在。
-3. 并发 `Agent(run_in_background=true)` × N
+2. **存档 prompt.md（不可跳过）**
+3. 并发 `Agent(run_in_background=true, model="opus")` × N ← coder 用最强推理模型
 
 Prompt 模板：
 ```
@@ -289,8 +323,8 @@ output.log 少于 5 行 = 失败！
 ## Phase 3: 并行测试
 
 1. 找出 `type=test` 且 depends_on 全满足的就绪任务
-2. **存档 prompt.md（不可跳过）**：每个 tester 派发前，先用 Write 工具把完整 prompt 写入 `<RUN_DIR>/<id>/prompt.md`。Agent 返回后 `ls` 确认存在。
-3. 并发 Agent(background)
+2. **存档 prompt.md（不可跳过）**
+3. 并发 `Agent(run_in_background=true, model="sonnet")` ← tester/reviewer 用不同模型，盲区不同
 
 Prompt 模板：
 ```
@@ -343,14 +377,8 @@ output.log 少于 5 行 = 失败！
 
 ## Phase 4: 验收（必须启动独立 Agent，编排器不得自己验收）
 
-1. **第一步：存档 prompt.md（不可跳过）**
-   ```bash
-   # 先创建目录，再用 Write 工具写入 prompt.md
-   mkdir -p <RUN_DIR>/acceptor-01/
-   Write: <RUN_DIR>/acceptor-01/prompt.md   ← 把下面的 prompt 模板填好写进去
-   ```
-
-2. **第二步：启动验收 Agent**（`run_in_background: true`），编排器自己不能验收
+1. **第一步：存档 prompt.md（不可跳过）**（创建目录 → Write prompt.md）
+2. **第二步：启动验收 Agent**：`Agent(run_in_background=true, model="haiku")` ← 便宜模型，只对照验收标准逐条跑命令
 
 3. **第三步：验证** — Agent 返回后执行 `ls <RUN_DIR>/acceptor-01/prompt.md`，文件不存在 → 重新存档
 

@@ -1,0 +1,42 @@
+# 先并行编码，再交叉审查，最后测试验收
+name: review-first
+description: "Code → Review → Test → Accept with parallel coding"
+
+stages:
+  - id: coding
+    parallel: true
+    count: "2-4"
+    depends_on: []
+    role: |
+      你是 {name}，负责 {responsibility}。
+      只写实现代码，不写测试。写完必须用 Bash 实际运行。
+      产出: result.md（含文件清单 + 终端输出）
+
+  - id: review
+    parallel: true
+    count: "1-2"
+    depends_on: [coding]
+    role: |
+      你是代码审查员。审查 coder 的代码：
+      - 逻辑正确性、安全漏洞、性能问题
+      - 逐文件标注问题等级（严重/一般/建议）
+      产出: review-report.md
+
+  - id: testing
+    parallel: false
+    count: 1
+    depends_on: [review]
+    role: |
+      你是测试员。只能拿到需求规格，不能看实现代码。
+      测试必须覆盖边界值、异常输入、组合场景。
+      实际运行测试，粘贴终端输出。
+      产出: test-report.md（测试用例表 + bash 代码块）
+
+  - id: acceptance
+    parallel: false
+    count: 1
+    depends_on: [testing]
+    role: |
+      你是验收员。不信任任何前手，逐条独立验证验收标准。
+      逐条贴终端输出为证据。
+      产出: acceptance-report.md（逐条 ✅/❌ + VERDICT）

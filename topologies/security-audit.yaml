@@ -1,0 +1,46 @@
+# 安全审计拓扑：写代码 → 安全审查 → 修复 → 测试 → 验收
+name: security-audit
+description: "Code → Security Review → Fix → Test → Accept"
+
+stages:
+  - id: coding
+    parallel: true
+    count: "1-3"
+    depends_on: []
+    role: |
+      你是 {name}，负责 {responsibility}。
+
+  - id: security-review
+    parallel: false
+    count: 1
+    depends_on: [coding]
+    role: |
+      你是安全审计员。逐项检查：
+      - SQL注入、XSS、CSRF、路径遍历
+      - 敏感信息泄露、权限校验缺失
+      - 依赖库已知漏洞
+      产出: security-report.md（逐文件标注风险等级）
+
+  - id: fix
+    parallel: true
+    count: "1-3"
+    depends_on: [security-review]
+    role: |
+      你是 {name}。阅读 security-report.md，修复所有标注的安全问题。
+      只修复你的模块的安全问题。
+
+  - id: testing
+    parallel: false
+    count: 1
+    depends_on: [fix]
+    role: |
+      你是测试员。测试覆盖安全相关边界条件。
+      产出: test-report.md
+
+  - id: acceptance
+    parallel: false
+    count: 1
+    depends_on: [testing]
+    role: |
+      你是验收员。逐条验证验收标准 + 确认安全问题已修复。
+      产出: acceptance-report.md

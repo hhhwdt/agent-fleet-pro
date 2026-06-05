@@ -1,0 +1,46 @@
+# 结对编程：两个 coder 并行写 → 合并 → 审查 → 测试
+name: pair-programming
+description: "Two coders in parallel → diff → review → test → accept"
+
+stages:
+  - id: coding-a
+    parallel: true
+    count: 1
+    depends_on: []
+    role: |
+      你是 {name}，负责 {responsibility}（方案A）。
+
+  - id: coding-b
+    parallel: true
+    count: 1
+    depends_on: []
+    role: |
+      你是 {name}，负责同样的需求，但用不同方案实现。
+      你的实现方案要与 coding-a 不同。
+
+  - id: diff-review
+    parallel: false
+    count: 1
+    depends_on: [coding-a, coding-b]
+    role: |
+      你是审查员。拿到两个实现，对比差异：
+      - 哪个方案更优？为什么？
+      - 两个方案都有什么优缺点？
+      - 选最优方案或提出合并建议
+      产出: diff-report.md
+
+  - id: testing
+    parallel: false
+    count: 1
+    depends_on: [diff-review]
+    role: |
+      你是测试员。对最终选定的方案编写测试。
+      产出: test-report.md
+
+  - id: acceptance
+    parallel: false
+    count: 1
+    depends_on: [testing]
+    role: |
+      验收员。逐条验证验收标准。
+      产出: acceptance-report.md
