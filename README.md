@@ -17,6 +17,7 @@
 - [文件放在哪里](#文件放在哪里)
 - [安装与部署](#安装与部署)
 - [使用场景](#使用场景)
+- [高级用法](#高级用法)
 - [Dashboard 怎么看](#dashboard-怎么看)
 - [配置参考](#配置参考)
 - [常见问题](#常见问题)
@@ -224,13 +225,13 @@ cd D:\project-b && claude
 ### 场景 4：只想要管道基础设施，不用 Claude Code
 
 ```python
-from agent_fleet import init_pipeline, decompose_task, generate_report
+from agent_fleet import init_pipeline, decomposition_prompt, generate_report
 
 # 初始化管道
 meta = init_pipeline("./my-project", ".fleet", "做一个计算器")
 
 # 拆分提示词发给你的 Agent（Cursor / Codex / 任何 AI）
-print(decompose_task("做一个计算器"))
+print(decomposition_prompt("做一个计算器"))
 
 # Agent 执行后，往 meta["run_dir"]/coder-01/output.log 写日志
 # Dashboard 自动读取
@@ -265,6 +266,96 @@ print(decompose_task("做一个计算器"))
 - **提示词**：发给 Agent 的完整 prompt，排查问题时非常有用
 
 **选中运行但未选任务时**：显示综合视图——需求分析报告 → 变更记录（点击 ▶ 展开看代码）→ 执行报告 → 耗时统计。
+
+---
+
+## 高级用法
+
+### 自定义流水线（--topology）
+
+Agent Fleet 不只支持默认的 code→test→accept 三阶段。你可以用 `--topology` 参数选择预置流水线，或者创建自己的。
+
+**内置拓扑：**
+
+| 拓扑 | 命令 | 适用场景 |
+|---|---|---|
+| `review-first` | `--topology review-first` | 编码→审查→测试→验收，适合复杂逻辑 |
+| `security-audit` | `--topology security-audit` | 编码→安全审计→修复→测试→验收 |
+| `pair-programming` | `--topology pair-programming` | 双方案并行→对比→选优→测试→验收 |
+
+**创建自定义拓扑：** 在 `topologies/` 目录下新建 YAML 文件：
+
+```yaml
+name: my-pipeline
+description: "我的自定义流水线"
+
+stages:
+  - id: coding
+    parallel: true        # 这个阶段并行执行
+    count: "2-3"          # 启动 2-3 个 agent
+    depends_on: []        # 无依赖，第一阶段
+    role: |
+      你是 {name}，负责 {responsibility}。
+      只写实现代码，不写测试。
+
+  - id: review
+    parallel: true
+    count: 1
+    depends_on: [coding]  # coding 完成后才执行
+    role: |
+      你是代码审查员。检查逻辑正确性和安全问题。
+      产出 review-report.md。
+
+  - id: testing
+    parallel: false
+    count: 1
+    depends_on: [review]
+    role: |
+      你是测试员。只能拿到需求规格，不能看实现代码。
+      产出 test-report.md（含终端输出）。
+
+  - id: acceptance
+    parallel: false
+    count: 1
+    depends_on: [testing]
+    role: |
+      你是验收员。逐条独立验证验收标准。
+      产出 acceptance-report.md（逐条 ✅/❌ + VERDICT）。
+```
+
+每个 stage 的 `id` 会成为 plan.json 里的 `type` 字段，Depends_on 字段会被解析为依赖图。引擎自动按拓扑排序调度。
+
+### 用户提供验收标准（--acceptance）
+
+让产品/QA 团队维护验收用例文件，Agent Fleet 不经过 LLM 生成验收标准：
+
+```bash
+/agent-fleet-pro --acceptance ./specs/login-cases.md 做登录功能
+```
+
+`login-cases.md` 的内容直接作为 acceptor 的验收依据，不再受 LLM 知识盲区限制。每条验收标准格式：
+
+```markdown
+## ac-1: 密码少于8位时拒绝注册
+- 输入: username="test", password="123"
+- 期望: 返回错误，消息包含"密码长度不足"
+
+## ac-2: 用户名已存在时注册失败
+- 输入: username="admin", password="Abc12345"
+- 期望: 返回错误，消息包含"用户名已存在"
+```
+
+### 多模型交叉审查
+
+Agent Fleet 会为不同角色分配不同模型，利用不同模型的推理差异做真正的交叉审查：
+
+| 角色 | 模型 | 原因 |
+|---|---|---|
+| Coder | Opus | 最强推理，写代码 |
+| Tester/Reviewer | Sonnet | 不同模型有不同的盲区 |
+| Acceptor | Haiku | 便宜，只对照验收标准逐条跑命令验证 |
+
+不同模型在同一个错误上同时栽的概率远低于同一个模型用三种口吻审查自己。
 
 ---
 
