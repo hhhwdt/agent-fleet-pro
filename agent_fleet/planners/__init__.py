@@ -1,6 +1,7 @@
 """Planners — task decomposition strategies."""
 
-import abc, json, tempfile, os
+import abc, json, tempfile, os, logging
+logger = logging.getLogger("agent_fleet.planners")
 
 
 class BasePlanner(abc.ABC):
@@ -86,8 +87,9 @@ Return ONLY valid JSON:
             try:
                 return json.loads(text)
             except json.JSONDecodeError:
-                pass
+                logger.warning("LLMPlanner: JSON parse failed, falling back to TemplatePlanner. Raw output: %s", text[:200])
         # Fallback
+        logger.info("LLMPlanner: using TemplatePlanner (fallback)")
         return TemplatePlanner().plan(task, context)
 
 
@@ -95,19 +97,16 @@ class DocAwarePlanner(LLMPlanner):
     """Document-aware planner — reads requirement docs before planning."""
 
     def plan(self, task, context=None):
-        # If task is a file path or URL, read it first
-        if task.startswith("http://") or task.startswith("https://"):
-            prompt = f"Read and summarize the requirements from this URL: {task}"
-        elif any(task.endswith(ext) for ext in [".md", ".txt"]):
-            prompt = f"Read and analyze the requirements document at path: {task}. The file content should be read first, then used for planning."
-        else:
-            return super().plan(task, context)
-
-        plan_dir = os.path.join(tempfile.gettempdir(), "agent_fleet_plan")
-        result = self.adapter.execute(prompt, ".", plan_dir, 120)
-        analysis = result.get("output", "") if result.get("success") else ""
         ctx = context or {}
-        ctx["analysis"] = analysis
+        if any(task.endswith(ext) for ext in [".md", ".txt", ".rst"]):
+            if os.path.isfile(task):
+                try:
+                    with open(task, "r", encoding="utf-8") as f:
+                        ctx["analysis"] = f"## Document: {task}\n\n{f.read()[:3000]}"
+                except Exception as e:
+                    logger.warning("DocAwarePlanner: failed to read %s: %s", task, e)
+            else:
+                logger.warning("DocAwarePlanner: file not found: %s", task)
         return super().plan(task, ctx)
 
 

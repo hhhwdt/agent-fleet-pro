@@ -233,6 +233,29 @@ class AgentFleet:
         self._stats_lock = threading.Lock()
         self.stats = {"tasks": 0, "retries": 0, "failures": {}, "durations": []}
 
+    def _topology_to_plan(self, topo: dict, task: str) -> dict:
+        """Convert topology YAML to plan dict for the pipeline."""
+        tasks = []
+        for stage in topo.get("stages", []):
+            sid = stage["id"]
+            count_str = str(stage.get("count", "1"))
+            count_max = int(count_str.split("-")[-1]) if "-" in count_str else int(count_str)
+            for i in range(count_max):
+                tid = f"{sid}-{i+1:02d}" if count_max > 1 else f"{sid}-01"
+                tasks.append({
+                    "id": tid,
+                    "type": sid,
+                    "name": f"{sid} #{i+1}" if count_max > 1 else sid,
+                    "responsibility": stage.get("role", f"Execute {sid} stage"),
+                    "expected_files": [],
+                    "depends_on": [f"{d}-01" for d in stage.get("depends_on", [])],
+                })
+        return {
+            "summary": task[:80],
+            "acceptance_criteria": [{"id": "ac-1", "description": "All stages complete", "verify": "Pipeline passes"}],
+            "tasks": tasks,
+        }
+
     def _load_topology(self, name: str) -> dict:
         """Load topology from topologies/<name>.yaml."""
         path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "topologies", f"{name}.yaml")
@@ -241,9 +264,13 @@ class AgentFleet:
         with open(path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
 
-    def run(self, task: str, plan: dict = None):
+    def run(self, task: str, plan: dict = None, topology: str = None):
         if plan is None:
-            plan = self.planner.plan(task)
+            if topology:
+                topo = self._load_topology(topology)
+                plan = self._topology_to_plan(topo, task)
+            else:
+                plan = self.planner.plan(task)
         meta = init_pipeline(self.work_dir, self.fleet_dir, task, plan)
         run_dir, tasks = meta["run_dir"], meta["tasks"]
         done = set()  # Global done set — survives across phases
