@@ -144,22 +144,23 @@ def register_routes(app):
         return jsonify({"run": run_id, "changes": changes})
 
     @app.route("/api/fleet-task-sandbox")
-def api_fleet_task_sandbox():
-    run_id = _safe(request.args.get("run", ""), app.config["WORK_DIR"])
-    task_id = _safe(request.args.get("task", ""), app.config["WORK_DIR"])
-    sf = os.path.join(app.config["WORK_DIR"], app.config["FLEET_DIR"], run_id, task_id, "sandbox.json")
-    if os.path.exists(sf):
-        try:
-            with open(sf, "r", encoding="utf-8") as f:
-                return jsonify({"run": run_id, "task": task_id, "sandbox": json.load(f)})
-        except (IOError, json.JSONDecodeError): pass
-    return jsonify({"run": run_id, "task": task_id, "sandbox": None})
+    def api_fleet_task_sandbox():
+        run_id = _safe(request.args.get("run", ""), app.config["WORK_DIR"])
+        task_id = _safe(request.args.get("task", ""), app.config["WORK_DIR"])
+        sf = os.path.join(app.config["WORK_DIR"], app.config["FLEET_DIR"], run_id, task_id, "sandbox.json")
+        if os.path.exists(sf):
+            try:
+                with open(sf, "r", encoding="utf-8") as f:
+                    return jsonify({"run": run_id, "task": task_id, "sandbox": json.load(f)})
+            except (IOError, json.JSONDecodeError): pass
+        return jsonify({"run": run_id, "task": task_id, "sandbox": None})
 
 
-@app.route("/api/fleet-runs/delete", methods=["POST"])
+    @app.route("/api/fleet-runs/delete", methods=["POST"])
     def api_fleet_runs_delete():
         data = request.get_json() or {}
-        run_id = _safe(data.get("run", ""))
-        if not run_id: return jsonify({"ok": False, "error": "missing run id"}), 400
+        run_id = _safe(data.get("run", ""), app.config["WORK_DIR"])
+        if not run_id:
+            return jsonify({"ok": False, "error": "missing run id"}), 400
         ok = delete_run(app.config["WORK_DIR"], app.config["FLEET_DIR"], run_id)
         return jsonify({"ok": True if ok else False, "error": "" if ok else "not found"})

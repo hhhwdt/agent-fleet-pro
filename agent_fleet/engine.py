@@ -13,7 +13,7 @@ Your agent does the actual coding/testing/acceptance work. Agent Fleet tells
 it WHAT to do and shows you the big picture.
 """
 
-import os, json
+import os, json, yaml, threading
 from datetime import datetime
 from . import storage, events
 from .adapters import get_adapter
@@ -230,8 +230,16 @@ class AgentFleet:
         self.planner = get_planner(config, self.adapter)
         sb_cfg = config.get("sandbox", {})
         self.sandbox = SubprocessSandbox(timeout=sb_cfg.get("timeout_seconds", 30)) if sb_cfg.get("enabled", True) else None
-        # Observability
+        self._stats_lock = threading.Lock()
         self.stats = {"tasks": 0, "retries": 0, "failures": {}, "durations": []}
+
+    def _load_topology(self, name: str) -> dict:
+        """Load topology from topologies/<name>.yaml."""
+        path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "topologies", f"{name}.yaml")
+        if not os.path.exists(path):
+            raise ValueError(f"Topology not found: {name}. Available: review-first, security-audit, pair-programming")
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
 
     def run(self, task: str, plan: dict = None):
         if plan is None:
@@ -308,7 +316,8 @@ class AgentFleet:
                             events.append_event(os.path.join(run_dir, t["id"]), "task.completed")
                         else:
                             events.append_event(os.path.join(run_dir, t["id"]), "task.failed", error="agent returned failure")
-                        self.stats["tasks"] += 1
+                        with self._stats_lock:
+                            self.stats["tasks"] += 1
                     except Exception as e:
                         events.append_event(os.path.join(run_dir, t["id"]), "task.failed", error=str(e))
 
@@ -363,7 +372,8 @@ class AgentFleet:
         with open(os.path.join(td, out_file), "w", encoding="utf-8") as f:
             f.write(f"# {task.get('name', tid)}\n\n{result.get('output', '')[:3000]}\n")
 
-        self.stats["durations"].append(_time.time() - t_start)
+        with self._stats_lock:
+            self.stats["durations"].append(_time.time() - t_start)
 
         # Sandbox verification for coder output
         if self.sandbox and task_type == "code":
@@ -378,7 +388,8 @@ class AgentFleet:
                     f.write(f"[沙箱错误] {sb_result.stderr[:500]}\n")
 
         storage.update_status(run_dir,
-            agents={tid: {"status": "done" if result["success"] else "failed"}})
+            agents={tid: {"status": "done" if result["success"] else "failed"}},
+            progress={"done": self.stats["tasks"]})
         return result.get("success", False)
 
     def _prompt(self, task, run_dir):
@@ -440,17 +451,30 @@ output.log with fewer than 5 lines = REJECTED.
 ## Output Directory: {os.path.join(run_dir, tid)}"""
 
     def _run_sandbox(self, run_dir, task_dir):
-        """Run generated Python files in sandbox and return result."""
+        """Run coder's generated code in sandbox. Find entry point intelligently."""
         from .sandbox import SandboxResult
-        py_files = []
-        for root, _, files in os.walk(self.work_dir):
-            if ".fleet" in root:
-                continue
-            for fn in files:
-                if fn.endswith(".py"):
-                    py_files.append(os.path.join(root, fn))
-        if py_files:
-            return self.sandbox.run_script(py_files[0])
+        # Check task's result.md for file list, then verify those files exist and are new
+        result_md = os.path.join(task_dir, "result.md")
+        candidates = []
+        if os.path.exists(result_md):
+            with open(result_md, "r", encoding="utf-8") as f:
+                text = f.read()
+                import re
+                for m in re.finditer(r'[\w./-]+\.py', text):
+                    fp = os.path.join(self.work_dir, m.group(0).lstrip("./\\"))
+                    if os.path.isfile(fp):
+                        candidates.append(fp)
+        # Fallback: find Python files modified after task started
+        if not candidates:
+            for root, _, files in os.walk(self.work_dir):
+                if ".fleet" in root: continue
+                for fn in files:
+                    if fn.endswith(".py") and fn != "setup.py":
+                        fp = os.path.join(root, fn)
+                        if os.path.getmtime(fp) > os.path.getmtime(task_dir):
+                            candidates.append(fp)
+        if candidates:
+            return self.sandbox.run_script(candidates[0])
         return SandboxResult()
 
     def _check_acceptance(self, run_dir) -> bool:
