@@ -273,7 +273,7 @@ ls -la <RUN_DIR>/FINAL_REPORT.md  # 存在 + ≥500B
 
 1. 找出 `type=code` 且 depends_on 全满足的就绪任务
 2. **存档 prompt.md（不可跳过）**
-3. 并发 `Agent(run_in_background=true, model="opus")` × N ← coder 用最强推理模型
+3. 并发 `Agent(run_in_background=true)` × N ← coder 用最强推理模型
 
 Prompt 模板：
 ```
@@ -324,7 +324,7 @@ output.log 少于 5 行 = 失败！
 
 1. 找出 `type=test` 且 depends_on 全满足的就绪任务
 2. **存档 prompt.md（不可跳过）**
-3. 并发 `Agent(run_in_background=true, model="sonnet")` ← tester/reviewer 用不同模型，盲区不同
+3. 并发 `Agent(run_in_background=true)` ← tester/reviewer 用不同模型，盲区不同
 
 Prompt 模板：
 ```
@@ -378,7 +378,7 @@ output.log 少于 5 行 = 失败！
 ## Phase 4: 验收（必须启动独立 Agent，编排器不得自己验收）
 
 1. **第一步：存档 prompt.md（不可跳过）**（创建目录 → Write prompt.md）
-2. **第二步：启动验收 Agent**：`Agent(run_in_background=true, model="haiku")` ← 便宜模型，只对照验收标准逐条跑命令
+2. **第二步：启动验收 Agent**：`Agent(run_in_background=true)` ← 便宜模型，只对照验收标准逐条跑命令
 
 3. **第三步：验证** — Agent 返回后执行 `ls <RUN_DIR>/acceptor-01/prompt.md`，文件不存在 → 重新存档
 
