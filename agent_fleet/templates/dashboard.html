@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-bs-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Agent Fleet</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<link rel="stylesheet" id="hljs-theme" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+/* ============================================================
+   Variables: dark theme (default)
+   ============================================================ */
+:root {
+  --bg: #05080f; --bg2: #0b1019; --bg3: #131b26; --border: #1c2636;
+  --text: #e4e9f2; --text2: #8896aa; --text3: #354052;
+  --accent: #3b8bff; --accent2: #6366f1; --accent-glow: rgba(59,139,255,.25); --accent-dim: rgba(59,139,255,.12);
+  --green: #10b981; --green-glow: rgba(16,185,129,.3); --green-dim: rgba(16,185,129,.12);
+  --red: #f43f5e; --red-glow: rgba(244,63,94,.2); --red-dim: rgba(244,63,94,.1);
+  --yellow: #f59e0b; --orange: #f97316; --purple: #8b5cf6; --cyan: #06b6d4;
+  --radius: 12px; --radius-sm: 7px;
+  --font: -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","PingFang SC",sans-serif;
+  --font-mono: "Cascadia Code","JetBrains Mono","SF Mono","Fira Code","Consolas",monospace;
+}
+/* ============================================================
+   Variables: light theme
+   ============================================================ */
+[data-bs-theme="light"] {
+  --bg: #f8f9fb; --bg2: #fff; --bg3: #f1f3f6; --border: #dde1e6;
+  --text: #1a1d23; --text2: #4b5563; --text3: #9ca3af;
+  --accent: #1a56db; --accent-glow: rgba(26,86,219,.1); --accent-dim: rgba(26,86,219,.08);
+  --green: #047857; --green-glow: rgba(4,120,87,.1); --green-dim: rgba(4,120,87,.08);
+  --red: #dc2626; --red-glow: rgba(220,38,38,.08); --red-dim: rgba(220,38,38,.06);
+  --yellow: #b45309; --orange: #ea580c; --purple: #6d28d9; --cyan: #0891b2;
+}
+
+/* ============================================================
+   Base
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  height: 100vh; overflow: hidden; font-size: 13px; font-family: var(--font);
+  background: var(--bg); color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image: radial-gradient(circle at 20% 30%, rgba(59,139,255,.03) 0%, transparent 50%),
+                    radial-gradient(circle at 80% 60%, rgba(139,92,246,.02) 0%, transparent 50%),
+                    radial-gradient(circle at 40% 80%, rgba(6,182,212,.02) 0%, transparent 50%);
+}
+[data-bs-theme="light"] body::before { display: none; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--text3); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text2); }
+
+/* ============================================================
+   Layout
+   ============================================================ */
+.topbar {
+  height: 46px; position: relative; z-index: 1;
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+}
+.topbar::after {
+  content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--purple), var(--cyan), transparent);
+  opacity: .5;
+}
+.col-header {
+  padding: 10px 16px; font-size: 10.5px; font-weight: 700; letter-spacing: .8px; color: var(--text2);
+  background: linear-gradient(180deg, var(--bg3) 0%, var(--bg2) 100%);
+  border-bottom: 1px solid var(--border); text-transform: uppercase; user-select: none;
+}
+.scroll-area { overflow-y: auto; flex: 1; position: relative; z-index: 1; }
+
+/* Sidebars */
+.sbar { background: var(--bg2); border-right: 1px solid var(--border); position: relative; z-index: 1; }
+.sbar-l { width: 255px; min-width: 160px; }
+.sbar-m { width: 320px; min-width: 180px; }
+.sbar-r { flex: 1; min-width: 0; background: var(--bg); border-radius: var(--radius) 0 0 0; }
+.resize-handle { position: absolute; right: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 10; }
+.resize-handle:hover, .resize-handle.active { background: var(--accent); opacity: .3; }
+
+/* ============================================================
+   Components
+   ============================================================ */
+/* Status dot */
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; vertical-align: middle; transition: all .3s; background: var(--text3); }
+.dot.live { background: var(--green); box-shadow: 0 0 10px var(--green-glow), 0 0 20px var(--green-glow); animation: dotPulse 2s ease-in-out infinite; }
+@keyframes dotPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.3;transform:scale(.7)} }
+
+/* Run & task items */
+.list-item {
+  cursor: pointer; transition: all .25s ease; border-left: 3px solid transparent;
+  position: relative; border-radius: var(--radius-sm); margin: 2px 4px;
+}
+.list-item:first-child { margin-top: 4px; }
+.list-item:last-child { margin-bottom: 4px; }
+.list-item::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  border-radius: 3px 0 0 3px; opacity: 0; transition: opacity .25s;
+}
+.list-item:hover { background: var(--accent-dim); }
+.list-item:hover::before { opacity: 1; }
+.list-item.active { background: var(--accent-dim); }
+.list-item.active::before { opacity: 1; }
+.run-item::before { background: linear-gradient(180deg, var(--accent), var(--purple)); }
+.task-item::before { background: linear-gradient(180deg, var(--accent), var(--cyan)); }
+.task-item.active::before { background: linear-gradient(180deg, var(--accent), var(--cyan)); }
+.task-item.running { border-left-color: var(--green); }
+.task-item.running::before { background: linear-gradient(180deg, var(--green), var(--cyan)); opacity: 1; }
+.list-item .del-btn { opacity: 0; transition: all .2s; cursor: pointer; position: relative; z-index: 2; font-size: 16px; line-height: 1; color: var(--red); }
+.list-item:hover .del-btn { opacity: .5; }
+.list-item .del-btn:hover { opacity: 1; transform: scale(1.3); text-shadow: 0 0 12px var(--red-glow); }
+
+/* Think log */
+.think-log { font-family: var(--font-mono); font-size: 11.5px; line-height: 1.75; padding: 4px 8px; }
+.think-log .line { padding: 5px 8px; display: flex; gap: 10px; border-bottom: 1px solid var(--border); transition: all .2s ease; border-radius: var(--radius-sm); }
+.think-log .line:hover { background: var(--accent-dim); }
+.think-log .line .icon { width: 26px; text-align: center; flex-shrink: 0; font-size: 12px; opacity: .6; transition: opacity .2s; }
+.think-log .line:hover .icon { opacity: 1; }
+.think-log .line .body { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-all; }
+.t-思考 { color: var(--purple); } .t-分析 { color: var(--accent); } .t-行动 { color: var(--yellow); }
+.t-结果 { color: var(--green); } .t-决定 { color: var(--orange); } .t-开始 { color: var(--cyan); }
+.t-完成 { color: var(--green); font-weight: 700; } .t-错误 { color: var(--red); }
+.t-其他 { color: var(--text2); }
+
+/* Stats */
+.stat-badge {
+  min-width: 48px; text-align: center; border-radius: var(--radius-sm);
+  background: var(--bg2); border: 1px solid var(--border); padding: 6px 10px;
+  transition: all .25s ease; position: relative; overflow: hidden;
+}
+.stat-badge:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0,0,0,.4), 0 0 30px var(--accent-glow); }
+
+/* Badges — soft & refined */
+.badge { font-weight: 500; letter-spacing: .2px; border-radius: 10px; padding: 2px 7px; font-size: 10px; }
+.br-success { background: var(--green-dim); color: var(--green); }
+.br-danger { background: var(--red-dim); color: var(--red); }
+.br-warning { background: rgba(245,158,11,.12); color: var(--yellow); }
+.br-info { background: var(--accent-dim); color: var(--accent); }
+.br-muted { background: rgba(136,150,170,.08); color: var(--text2); }
+/* Progress — Apple-style: thin, rounded, smooth */
+.progress { height: 3px; border-radius: 10px; background: var(--border); overflow: hidden; }
+.progress-bar { border-radius: 10px; transition: width .5s ease; }
+
+/* Phase indicator */
+.phase-indicator { display: flex; align-items: center; gap: 8px; }
+.phase-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); transition: all .4s ease; }
+.phase-dot.done { background: var(--green); box-shadow: 0 0 8px var(--green-glow); }
+.phase-dot.active { background: var(--accent); box-shadow: 0 0 12px var(--accent-glow); animation: dotPulse 2s infinite; }
+.phase-dot.failed { background: var(--red); box-shadow: 0 0 8px var(--red-glow); }
+
+/* Markdown rendering */
+.md { font-size: 13.5px; line-height: 1.8; color: var(--text); }
+.md h1 { font-size: 1.4rem; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin: 20px 0 12px; font-weight: 700; }
+.md h2 { font-size: 1.18rem; border-bottom: 1px solid var(--border); padding-bottom: 8px; margin: 18px 0 10px; font-weight: 600; }
+.md h3 { font-size: 1.02rem; margin: 14px 0 8px; font-weight: 600; }
+.md h4 { font-size: .92rem; color: var(--accent); margin: 12px 0 6px; font-weight: 600; }
+.md p { margin: 8px 0; }
+.md strong { color: var(--text); font-weight: 700; }
+.md a { color: var(--accent); text-decoration: none; }
+.md a:hover { text-decoration: underline; }
+.md code { background: var(--accent-dim); color: var(--accent); padding: 2px 6px; border-radius: 4px; font-size: 87%; }
+.md pre { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 18px; font-size: 12px; line-height: 1.65; overflow-x: auto; }
+.md pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+.md blockquote { border-left: 3px solid var(--accent); background: var(--accent-dim); color: var(--text2); padding: 10px 16px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin: 12px 0; }
+.md table { font-size: 12px; width: 100%; border-collapse: collapse; }
+.md th { background: var(--accent-dim); font-weight: 600; padding: 8px 14px; border-bottom: 2px solid var(--border); }
+.md td { padding: 7px 14px; border-bottom: 1px solid var(--border); }
+.md tr:hover td { background: var(--accent-dim); }
+.md ul, .md ol { padding-left: 22px; }
+.md li { line-height: 1.7; margin: 4px 0; }
+.md li::marker { color: var(--accent); }
+.md hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+.md img { max-width: 100%; border-radius: var(--radius-sm); }
+
+/* Card */
+.card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; transition: all .25s ease; }
+.card:hover { border-color: var(--accent-glow); }
+.card .card-hd { padding: 7px 16px; font-size: 11px; font-weight: 600; letter-spacing: .3px; color: var(--accent); background: linear-gradient(180deg, var(--bg3) 0%, transparent 100%); border-bottom: 1px solid var(--border); }
+.card .card-bd { padding: 16px 20px; }
+
+/* Collapse panel */
+.cp { border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; overflow: hidden; }
+.cp-hd { padding: 8px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px; background: var(--bg3); transition: background .15s; font-size: 11px; }
+.cp-hd:hover { background: var(--bg2); }
+.cp-hd .arr { transition: transform .2s; font-size: 10px; color: var(--text2); }
+.cp-hd.open .arr { transform: rotate(90deg); }
+.cp-bd { display: none; }
+.cp-bd.show { display: block; }
+.cp-bd pre { margin: 0; border-radius: 0; border: none; border-top: 1px solid var(--border); max-height: 300px; overflow-y: auto; }
+
+/* Empty state */
+.empty { color: var(--text3); user-select: none; }
+
+/* Modal */
+.modal-content { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 40px var(--accent-glow); }
+.modal-header, .modal-footer { border-color: var(--border); }
+.modal-backdrop { backdrop-filter: blur(6px); }
+
+/* Form overrides */
+.form-control { background: var(--bg); color: var(--text); border-color: var(--border); }
+.form-control::placeholder { color: var(--text3); }
+.form-control:focus { background: var(--bg); color: var(--text); border-color: var(--accent); box-shadow: 0 0 0 .15rem var(--accent-glow); }
+.progress { background: var(--bg3); }
+
+/* Tab buttons */
+.btn-group .btn { font-size: 11px; padding: 4px 14px; font-weight: 500; }
+.btn-outline-secondary { --bs-btn-color: var(--text2); --bs-btn-border-color: var(--border); --bs-btn-hover-bg: var(--bg3); --bs-btn-hover-color: var(--text); }
+.btn-check:checked + .btn-outline-secondary { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
+
+/* Skeleton loader */
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+.skeleton { background: linear-gradient(90deg, var(--bg2) 25%, var(--bg3) 50%, var(--bg2) 75%); background-size: 200% 100%; animation: shimmer 1.5s ease-in-out infinite; border-radius: var(--radius-sm); height: 12px; }
+.spinner-border { --bs-spinner-border-width: .12em; animation-duration: .8s; }
+
+/* Theme toggle */
+.theme-btn { cursor: pointer; font-size: 18px; user-select: none; }
+</style>
+</head>
+<body class="d-flex flex-column">
+
+<!-- ============== TOPBAR ============== -->
+<div class="topbar d-flex align-items-center px-3 gap-3">
+  <span style="font-size:14px;font-weight:700;letter-spacing:-.3px;color:var(--accent)">
+    <span class="dot idle" id="dot"></span> Agent Fleet
+  </span>
+  <span class="phase-indicator" id="phaseDots">
+    <span class="phase-dot" title="Init"></span>
+    <span class="phase-dot" title="Code"></span>
+    <span class="phase-dot" title="Test"></span>
+    <span class="phase-dot" title="Accept"></span>
+    <span class="phase-dot" title="Done"></span>
+  </span>
+  <span class="ms-auto theme-btn" onclick="toggleTheme()" id="themeToggle">🌙</span>
+  <small class="text-secondary" id="ws" style="font-size:11px">--</small>
+  <small class="text-secondary" id="updatedAt" style="font-size:10px;min-width:60px;text-align:right">--</small>
+</div>
+
+<!-- ============== MAIN ============== -->
+<div class="d-flex flex-grow-1" style="height:calc(100vh - 46px)">
+
+  <!-- Left: runs -->
+  <div class="sbar sbar-l d-flex flex-column" id="sidebarL">
+    <div class="resize-handle" id="resizeL"></div>
+    <div class="col-header">运行记录</div>
+    <div class="px-2 pt-1">
+      <div class="btn-group btn-group-sm w-100 mb-1">
+        <input type="radio" class="btn-check" name="fs" id="fAll" checked onclick="S._filter='all';renderRuns()">
+        <label class="btn btn-outline-secondary py-0" for="fAll" style="font-size:10px">全部</label>
+        <input type="radio" class="btn-check" name="fs" id="fRun" onclick="S._filter='executing';renderRuns()">
+        <label class="btn btn-outline-secondary py-0" for="fRun" style="font-size:10px">运行中</label>
+        <input type="radio" class="btn-check" name="fs" id="fDone" onclick="S._filter='done';renderRuns()">
+        <label class="btn btn-outline-secondary py-0" for="fDone" style="font-size:10px">已完成</label>
+      </div>
+      <div style="position:relative">
+        <input class="form-control form-control-sm pe-4" placeholder="搜索..." id="searchInput" oninput="renderRuns()" style="font-size:11px">
+        <span id="searchClear" onclick="var s=document.getElementById('searchInput');s.value='';renderRuns();this.style.display='none'" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text2);font-size:12px;display:none">&times;</span>
+      </div>
+    </div>
+    <div class="scroll-area" id="runs"><div class="empty text-center py-5"><div class="fs-1 opacity-25">🚀</div><div class="small">Waiting for tasks</div></div></div>
+  </div>
+
+  <!-- Middle: tasks -->
+  <div class="sbar sbar-m d-flex flex-column" id="sidebarM">
+    <div class="resize-handle" id="resizeM"></div>
+    <div class="col-header">任务列表</div>
+    <div class="scroll-area" id="tasks"><div class="empty text-center py-5"><div class="fs-1 opacity-25">👈</div><div class="small">Select a run</div></div></div>
+  </div>
+
+  <!-- Right: console -->
+  <div class="sbar-r d-flex flex-column">
+    <div class="col-header d-flex justify-content-between align-items-center">
+      <span id="panelTitle">控制台</span>
+      <div class="btn-group btn-group-sm">
+        <input type="radio" class="btn-check" name="tab" id="tabThink" checked onclick="switchTab('think')">
+        <label class="btn btn-outline-secondary" for="tabThink">思考</label>
+        <input type="radio" class="btn-check" name="tab" id="tabResult" onclick="switchTab('result')">
+        <label class="btn btn-outline-secondary" for="tabResult">结果</label>
+        <input type="radio" class="btn-check" name="tab" id="tabPrompt" onclick="switchTab('prompt')">
+        <label class="btn btn-outline-secondary" for="tabPrompt">提示</label>
+      </div>
+    </div>
+    <div class="d-none px-3 py-2 border-bottom border-secondary-subtle" id="timingBar" style="font-size:11px"><div class="d-flex gap-3 flex-wrap" id="timingContent"></div></div>
+    <div class="d-none px-3 py-1 small text-secondary border-bottom border-secondary-subtle" id="sum"></div>
+    <div class="d-none d-flex flex-wrap gap-1 px-3 py-2" id="statBar"></div>
+    <div class="d-none px-3 py-1 small text-secondary font-monospace" id="agentFile" style="font-size:10px"></div>
+    <div class="think-log scroll-area p-3" id="think"><div class="empty text-center py-5"><div class="fs-1 opacity-25">👈</div><div class="small">Select a task</div></div></div>
+    <div class="scroll-area p-3 d-none" id="result"><div class="empty text-center py-5"><div class="fs-1 opacity-25">📄</div><div class="small">Select a task</div></div></div>
+    <div class="scroll-area p-3 d-none" id="prompt"><div class="empty text-center py-5"><div class="fs-1 opacity-25">📝</div><div class="small">Select a task</div></div></div>
+  </div>
+</div>
+
+<!-- Analysis modal -->
+<div class="modal fade" id="analysisModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header"><h6 class="modal-title">需求分析报告</h6><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body md" id="analysisBody"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Delete modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header"><h6 class="modal-title">确认删除</h6><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body"><p class="mb-0 small" id="modalBody"></p></div>
+      <div class="modal-footer"><button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button><button class="btn btn-sm btn-danger" id="modalConfirm">删除</button></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   State
+   ============================================================ */
+var S = {
+  runs: [], activeRun: null, activeTask: null,
+  userScrolled: false, activeTab: 'think',
+  _filter: 'all', _analysisCache: '',
+  _rh: '', _th: '', _hh: '', _hlc: 0, _ph: '', _rh2: ''
+};
+var socket, deleteModal;
+
+/* ============================================================
+   Theme
+   ============================================================ */
+function toggleTheme() {
+  var h = document.documentElement, isDark = h.getAttribute('data-bs-theme') !== 'light';
+  h.setAttribute('data-bs-theme', isDark ? 'light' : 'dark');
+  document.getElementById('themeToggle').textContent = isDark ? '☀️' : '🌙';
+  localStorage.setItem('af-theme', isDark ? 'light' : 'dark');
+  var hl = document.getElementById('hljs-theme');
+  hl.href = isDark
+    ? 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css'
+    : 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css';
+}
+
+/* ============================================================
+   Panel resize
+   ============================================================ */
+function initResize(panelId, handleId) {
+  var p = document.getElementById(panelId), h = document.getElementById(handleId), sx, sw;
+  h.addEventListener('mousedown', function(e) {
+    sx = e.clientX; sw = p.offsetWidth; h.classList.add('active');
+    document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', function(e) {
+    if (!h.classList.contains('active')) return;
+    var w = sw + (e.clientX - sx);
+    if (w >= (parseInt(getComputedStyle(p).minWidth) || 150)) p.style.width = w + 'px';
+  });
+  document.addEventListener('mouseup', function() {
+    h.classList.remove('active'); document.body.style.cursor = ''; document.body.style.userSelect = '';
+  });
+}
+
+/* ============================================================
+   Init
+   ============================================================ */
+function init() {
+  if (localStorage.getItem('af-theme') === 'light') {
+    document.documentElement.setAttribute('data-bs-theme', 'light');
+    document.getElementById('themeToggle').textContent = '☀️';
+    document.getElementById('hljs-theme').href = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
+  }
+  deleteModal = new bootstrap.Modal('#deleteModal');
+  document.getElementById('modalConfirm').addEventListener('click', confirmDelete);
+  document.getElementById('think').addEventListener('scroll', function() {
+    var el = this; S.userScrolled = el.scrollTop + el.clientHeight < el.scrollHeight - 50;
+  });
+  initResize('sidebarL', 'resizeL');
+  initResize('sidebarM', 'resizeM');
+
+  socket = io();
+  socket.on('connect', function() { document.getElementById('dot').className = 'dot live'; });
+  socket.on('disconnect', function() { document.getElementById('dot').className = 'dot idle'; });
+  socket.on('runs_updated', onRunsUpdated);
+  socket.on('task_log', function(data) {
+    if (S.activeTask && S.activeRun && S.activeRun.id === data.run && S.activeTask.id === data.task) {
+      S._hh = ''; refreshPanel();
+    }
+  });
+}
+
+function onRunsUpdated(data) {
+  S.runs = data.runs || [];
+  var now = new Date();
+  document.getElementById('updatedAt').textContent = [now.getHours(), now.getMinutes(), now.getSeconds()].map(function(x) { return x.toString().padStart(2, '0'); }).join(':');
+  var live = S.runs.some(function(r) { return r.status === 'executing'; });
+  document.getElementById('dot').className = 'dot' + (live ? ' live' : '');
+
+  var runsJson = JSON.stringify(S.runs.map(function(r) { return r.id + ':' + r.status + ':' + r.done + ':' + r.total + ':' + r.phase; }));
+  if (runsJson !== S._rh) { S._rh = runsJson; renderRuns(); }
+
+  if (S.activeRun) {
+    var found = S.runs.find(function(r) { return r.id === S.activeRun.id; });
+    if (found) S.activeRun = found;
+    var tasksJson = JSON.stringify({ t: S.activeRun.plan_tasks, c: S.activeRun.completed, r: S.activeRun.running_list, f: S.activeRun.failed_list, p: S.activeRun.phase });
+    if (tasksJson !== S._th) { S._th = tasksJson; renderTasks(); }
+    updatePhaseDots(); renderTiming();
+  }
+  refreshPanel();
+}
+
+function refreshPanel() {
+  if (S.activeTask && S.activeTask.type !== 'report') {
+    if (S.activeTab === 'think') renderThink();
+    else if (S.activeTab === 'result') renderResult();
+    else if (S.activeTab === 'prompt') renderPrompt();
+  }
+}
+
+/* ============================================================
+   Tab switching
+   ============================================================ */
+function switchTab(tab) {
+  S.activeTab = tab;
+  document.getElementById('think').classList.toggle('d-none', tab !== 'think');
+  document.getElementById('result').classList.toggle('d-none', tab !== 'result');
+  document.getElementById('prompt').classList.toggle('d-none', tab !== 'prompt');
+  if (tab === 'result' && S.activeTask) renderResult();
+  if (tab === 'prompt' && S.activeTask) renderPrompt();
+}
+
+/* ============================================================
+   Render: runs
+   ============================================================ */
+function renderRuns() {
+  var el = document.getElementById('runs');
+  var q = (document.getElementById('searchInput').value || '').toLowerCase();
+  var clr = document.getElementById('searchClear'); if (clr) clr.style.display = q ? 'block' : 'none';
+  var filtered = S.runs;
+  if (S._filter && S._filter !== 'all') filtered = filtered.filter(function(r) { return r.status === S._filter; });
+  if (q) filtered = filtered.filter(function(r) { return (r.task || '').toLowerCase().indexOf(q) >= 0 || r.id.toLowerCase().indexOf(q) >= 0; });
+
+  if (!filtered.length) {
+    el.innerHTML = '<div class="empty text-center py-5"><div class="fs-1 opacity-25">' + (q || S._filter ? '🔍' : '🚀') + '</div><div class="small">' + (q || S._filter ? 'No matches' : 'Waiting for tasks') + '</div></div>';
+    return;
+  }
+
+  el.innerHTML = filtered.map(function(r) {
+    var sel = S.activeRun && S.activeRun.id === r.id, d = r.done || 0, t = r.total || 0;
+    var desc = (r.task || '').substring(0, 55) || '(no description)';
+    var dur = getRunDuration(r), durStr = dur ? fmtDuration(dur) : '';
+    var pct = t > 0 ? Math.round(d / t * 100) : 0;
+    return '<div class="list-item run-item p-2 px-3' + (sel ? ' active' : '') + '" onclick="selRun(\'' + r.id + '\')">' +
+      '<div class="d-flex align-items-start"><div class="flex-grow-1 min-w-0">' +
+      '<div class="fw-semibold small text-truncate">' + desc + '</div>' +
+      '<div class="text-secondary" style="font-size:10px">' + r.id + '</div>' +
+      '<div class="d-flex gap-2 mt-1 align-items-center">' + statusBadge(r.status) +
+      '<div class="progress" style="width:60px;flex-shrink:0"><div class="progress-bar" style="width:' + pct + '%;background:' + (r.status === 'done' ? 'var(--green)' : r.status === 'force_stopped' ? 'var(--red)' : 'var(--accent)') + '"></div></div>' +
+      '<small class="text-secondary">' + d + '/' + t + '</small>' +
+      (durStr ? '<small style="color:var(--accent);font-size:10px">' + durStr + '</small>' : '') +
+      (r.status === 'executing' ? '<span class="phase-dot active" style="width:6px;height:6px;margin-left:2px"></span>' : '') +
+      '</div></div>' +
+      '<span class="del-btn" title="Delete" onclick="event.stopPropagation();deleteRun(\'' + r.id + '\')">&times;</span>' +
+      '</div></div>';
+  }).join('');
+}
+
+function selRun(id) {
+  S.activeRun = S.runs.find(function(r) { return r.id === id; }); S.activeTask = null;
+  S._th = ''; S._analysisCache = ''; S._analysisAvailable = false;
+  document.getElementById('panelTitle').textContent = (S.activeRun.task || 'Console').substring(0, 40);
+  fetch('/api/fleet-run-report?run='+encodeURIComponent(id)).then(function(r){return r.json()}).then(function(d){
+    if(d.analysis&&d.analysis.trim()){S._analysisAvailable=true;S._analysisCache=d.analysis;renderTasks();}
+  }).catch(function(){});
+  renderRuns(); renderTasks(); renderTiming();
+  document.getElementById('think').innerHTML = '<div class="empty text-center py-5"><div class="fs-1 opacity-25">👈</div><div class="small">Select a task</div></div>';
+  document.getElementById('sum').classList.add('d-none');
+  document.getElementById('statBar').classList.add('d-none');
+  document.getElementById('agentFile').classList.add('d-none');
+}
+
+/* ============================================================
+   Render: tasks
+   ============================================================ */
+function renderTasks() {
+  var el = document.getElementById('tasks');
+  if (!S.activeRun) { el.innerHTML = '<div class="empty text-center py-5"><div class="fs-1 opacity-25">👈</div><div class="small">Select a run</div></div>'; return; }
+  var tasks = S.activeRun.plan_tasks || [], done = S.activeRun.completed || [], running = S.activeRun.running_list || [], failed = S.activeRun.failed_list || [];
+  if (!tasks.length) { el.innerHTML = '<div class="empty text-center py-5"><div class="fs-1 opacity-25">📋</div><div class="small">No tasks</div></div>'; return; }
+
+  var html = '', selId = S.activeTask ? S.activeTask.id : null;
+
+  if (S._analysisAvailable) {
+    html += '<div class="list-item task-item p-2 px-3' + (selId === '__analysis__' ? ' active' : '') + '" onclick="selReportItem(\'analysis\')" style="border-left-color:var(--cyan)"><div class="fw-semibold small">🔍 Analysis</div><div class="small text-secondary">View analysis report</div></div>';
+  }
+  if (S.activeRun.status === 'done' || S.activeRun.status === 'force_stopped') {
+    html += '<div class="list-item task-item p-2 px-3' + (selId === '__report__' ? ' active' : '') + '" onclick="selReportItem(\'report\')" style="border-left-color:var(--purple)"><div class="fw-semibold small">📊 Report</div><div class="small text-secondary">View FINAL_REPORT.md</div></div>';
+  }
+  if (html) html += '<div style="height:1px;margin:4px 0;background:var(--border)"></div>';
+
+  html += tasks.map(function(t) {
+    var st = 'pending'; if (done.indexOf(t.id) >= 0) st = 'done'; else if (running.indexOf(t.id) >= 0) st = 'running'; else if (failed.indexOf(t.id) >= 0) st = 'failed';
+    var colors = { done: 'br-info', running: 'br-success', failed: 'br-danger', pending: 'br-muted' };
+    var labels = { done: 'done', running: 'running', failed: 'failed', pending: 'pending' };
+    var sel = S.activeTask && S.activeTask.id === t.id;
+    return '<div class="list-item task-item p-2 px-3' + (st === 'running' ? ' running' : '') + (sel ? ' active' : '') + '" onclick="selTask(\'' + t.id + '\')">' +
+      '<div class="small text-secondary">' + t.id + '</div>' +
+      '<div class="fw-semibold small mb-1">' + t.name + '</div>' +
+      '<span class="badge ' + colors[st] + '" style="font-size:9px">' + labels[st] + '</span></div>';
+  }).join('');
+
+  el.innerHTML = html;
+}
+
+function selTask(id) {
+  S.activeTask = S.activeRun.plan_tasks.find(function(t) { return t.id === id; });
+  document.getElementById('panelTitle').textContent = S.activeTask.name || 'Console';
+  S._hh = ''; S._hlc = 0;
+  document.getElementById('think').innerHTML = '<div class="empty text-center py-5"><div class="spinner-border spinner-border-sm text-secondary mb-2"></div><div class="small">加载中...</div></div>';
+  document.getElementById('sum').classList.add('d-none');
+  document.getElementById('statBar').classList.add('d-none'); document.getElementById('statBar').innerHTML = '';
+  document.getElementById('agentFile').classList.add('d-none');
+  document.getElementById('result').innerHTML = '<div class="empty text-center py-5"><div class="spinner-border spinner-border-sm text-secondary mb-2"></div><div class="small">加载中...</div></div>';
+  renderTasks();
+  if (S.activeTab === 'think') renderThink();
+  else if (S.activeTab === 'result') renderResult();
+  else if (S.activeTab === 'prompt') renderPrompt();
+}
+
+function selReportItem(type) {
+  S.activeTask = { id: '__' + type + '__', name: type === 'analysis' ? '需求分析' : '执行报告', type: 'report' };
+  renderTasks();
+  var think = document.getElementById('think'), sum = document.getElementById('sum'), st = document.getElementById('statBar'), af = document.getElementById('agentFile');
+  st.classList.add('d-none'); af.classList.add('d-none');
+  sum.classList.remove('d-none');
+  sum.innerHTML = '<b>' + (type === 'analysis' ? '需求分析报告' : '执行报告') + '</b>';
+
+  if (type === 'analysis' && S._analysisCache) {
+    if (typeof marked !== 'undefined') { marked.setOptions({ breaks: true, gfm: true }); think.innerHTML = '<div class="card"><div class="card-hd">🔍 Analysis</div><div class="card-bd md">' + marked.parse(S._analysisCache) + '</div></div>'; }
+    else think.innerHTML = '<div class="card"><div class="card-hd">🔍 Analysis</div><div class="card-bd" style="white-space:pre-wrap;font-size:12px;line-height:1.7">' + S._analysisCache.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div></div>';
+    return;
+  }
+
+  think.innerHTML = '<div class="empty text-center py-5"><div class="spinner-border spinner-border-sm text-secondary mb-2"></div><div class="small">加载中...</div></div>';
+  fetch('/api/fleet-run-report?run=' + encodeURIComponent(S.activeRun.id))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var content = type === 'analysis' ? (data.analysis || '') : (data.report || '');
+      if (type === 'analysis') S._analysisCache = content;
+      if (!content.trim()) { think.innerHTML = '<div class="empty text-center py-5"><div class="small text-secondary">No report yet</div></div>'; return; }
+      if (typeof marked !== 'undefined') { marked.setOptions({ breaks: true, gfm: true }); think.innerHTML = '<div class="card"><div class="card-hd">' + (type === 'analysis' ? '🔍 需求分析报告' : '📊 执行报告') + '</div><div class="card-bd md">' + marked.parse(content) + '</div></div>'; }
+      else think.innerHTML = '<div class="card"><div class="card-hd">' + (type === 'analysis' ? '🔍 需求分析报告' : '📊 执行报告') + '</div><div class="card-bd" style="white-space:pre-wrap;font-size:12px;line-height:1.7">' + content.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div></div>';
+      setTimeout(function() { if (typeof hljs !== 'undefined') hljs.highlightAll(); }, 100);
+    })
+    .catch(function() { think.innerHTML = '<div class="empty text-center py-5"><div class="small text-danger">Failed to load</div></div>'; });
+}
+
+/* ============================================================
+   Render: think log
+   ============================================================ */
+async function renderThink() {
+  var el = document.getElementById('think'), sum = document.getElementById('sum'), st = document.getElementById('statBar'), af = document.getElementById('agentFile');
+  if (!S.activeTask) {
+    el.innerHTML = '<div class="empty text-center py-5"><div class="fs-1 opacity-25">👈</div><div class="small">Select a task</div></div>';
+    sum.classList.add('d-none'); sum.innerHTML = '';
+    st.classList.add('d-none'); st.innerHTML = '';
+    af.classList.add('d-none'); af.textContent = '';
+    S._hh = ''; S._hlc = 0;
+    return;
+  }
+  sum.classList.remove('d-none'); st.classList.remove('d-none'); af.classList.remove('d-none');
+  sum.innerHTML = '<b>' + S.activeTask.name + '</b> <span class="text-secondary ms-2">' + S.activeTask.id + '</span>';
+  af.textContent = '.fleet/' + S.activeRun.id + '/' + S.activeTask.id + '/output.log';
+
+  try {
+    var r = await fetch('/api/fleet-task-log?run=' + encodeURIComponent(S.activeRun.id) + '&task=' + encodeURIComponent(S.activeTask.id));
+    var data = await r.json(), lines = data.log || [];
+    var newHash = lines.length + ':' + (lines.length ? lines[lines.length - 1].substring(0, 60) : '');
+    if (newHash === S._hh && el.children.length > 0 && el.children[0].className !== 'empty') return;
+    S._hh = newHash;
+
+    if (!lines.length) {
+      el.innerHTML = '<div class="empty text-center py-5"><div class="fs-1 opacity-25">⏳</div><div class="small">Waiting for agent...</div></div>';
+      st.innerHTML = '<small class="text-secondary">No data</small>';
+      S._hlc = 0;
+      return;
+    }
+
+    var counts = {}, icons = { 思考: '💭', 分析: '🔍', 行动: '⚡', 结果: '📋', 决定: '🎯', 开始: '▶', 完成: '🏁', 错误: '❌' };
+    lines.forEach(function(l) { var m = l.match(/^\[([^\]]+)\]/); var c = m ? m[1] : 'other'; counts[c] = (counts[c] || 0) + 1; });
+
+    st.innerHTML = Object.keys(counts).map(function(k) {
+      var cmap = { 思考: 'var(--purple)', 分析: 'var(--accent)', 行动: 'var(--yellow)', 结果: 'var(--green)', 决定: 'var(--orange)', 开始: 'var(--cyan)', 完成: 'var(--green)', 错误: 'var(--red)' };
+      return '<div class="stat-badge"><div class="fw-bold small" style="color:' + (cmap[k] || 'var(--text2)') + '">' + counts[k] + '</div><div style="font-size:9px;color:var(--text2)">' + k + '</div></div>';
+    }).join('');
+
+    var hasNew = lines.length > S._hlc;
+    S._hlc = lines.length;
+
+    el.innerHTML = lines.map(function(l) {
+      var m = l.match(/^\[([^\]]+)\]\s*(.*)/), cat = m ? m[1] : 'other', body = m ? m[2] : l;
+      var icon = icons[cat] || '•', cls = 't-' + (icons[cat] ? cat : 'other');
+      return '<div class="line"><div class="icon">' + icon + '</div><div class="body ' + cls + '">' + (body || l).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div></div>';
+    }).join('');
+
+    if (hasNew && !S.userScrolled) el.scrollTop = el.scrollHeight;
+  } catch (e) {
+    el.innerHTML = '<div class="empty text-center py-5"><div class="small text-danger">加载失败: ' + e.message + '</div></div>';
+    st.innerHTML = '';
+  }
+}
+
+/* ============================================================
+   Render: result
+   ============================================================ */
+async function renderResult() {
+  var el = document.getElementById('result');
+  if (!S.activeTask) { el.innerHTML = '<div class="empty text-center py-5"><div class="fs-1 opacity-25">📄</div><div class="small">Select a task</div></div>'; return; }
+  try {
+    var r = await fetch('/api/fleet-task-result?run=' + encodeURIComponent(S.activeRun.id) + '&task=' + encodeURIComponent(S.activeTask.id));
+    var data = await r.json(), results = data.results || {}, keys = Object.keys(results);
+    if (!keys.length) { el.innerHTML = '<div class="empty text-center py-5"><div class="fs-1 opacity-25">📄</div><div class="small">No output files</div></div>'; return; }
+    if (typeof marked === 'undefined') { el.innerHTML = '<div class="empty text-center py-5"><div class="small">加载中...rkdown...</div></div>'; return; }
+    marked.setOptions({ breaks: true, gfm: true });
+    var wasScrolled = el.scrollTop + el.clientHeight < el.scrollHeight - 50;
+    el.innerHTML = keys.map(function(k) {
+      return '<div class="card mb-3"><div class="card-hd">📄 ' + k + '</div><div class="card-bd md">' + marked.parse(results[k]) + '</div></div>';
+    }).join('');
+    if (!wasScrolled) el.scrollTop = el.scrollHeight;
+    setTimeout(function() { if (typeof hljs !== 'undefined') hljs.highlightAll(); }, 100);
+  } catch (e) { el.innerHTML = '<div class="empty text-center py-5"><div class="small text-danger">加载失败: ' + e.message + '</div></div>'; }
+}
+
+/* ============================================================
+   Render: prompt
+   ============================================================ */
+async function renderPrompt() {
+  var el = document.getElementById('prompt');
+  if (!S.activeTask) { el.innerHTML = '<div class="empty text-center py-5"><div class="fs-1 opacity-25">📝</div><div class="small">Select a task</div></div>'; return; }
+  try {
+    var r = await fetch('/api/fleet-task-prompt?run=' + encodeURIComponent(S.activeRun.id) + '&task=' + encodeURIComponent(S.activeTask.id));
+    var data = await r.json(), text = data.prompt || '';
+    if (!text.trim()) { el.innerHTML = '<div class="empty text-center py-5"><div class="fs-1 opacity-25">📝</div><div class="small">No prompt saved</div></div>'; return; }
+    var nh = S.activeTask.id + ':' + text.length;
+    if (nh === S._ph && el.children.length > 0) return;
+    S._ph = nh;
+    if (typeof marked === 'undefined') { el.innerHTML = '<div class="empty text-center py-5"><div class="small">加载中...rkdown...</div></div>'; return; }
+    marked.setOptions({ breaks: true, gfm: true });
+    var wasScrolled = el.scrollTop + el.clientHeight < el.scrollHeight - 50;
+    el.innerHTML = '<div class="card"><div class="card-hd">📝 ' + S.activeTask.name + ' (' + text.length + ' chars)</div><div class="card-bd md">' + marked.parse(text) + '</div></div>';
+    if (!wasScrolled) el.scrollTop = 0;
+    setTimeout(function() { if (typeof hljs !== 'undefined') hljs.highlightAll(); }, 100);
+  } catch (e) { el.innerHTML = '<div class="empty text-center py-5"><div class="small text-danger">加载失败: ' + e.message + '</div></div>'; }
+}
+
+/* ============================================================
+   Delete
+   ============================================================ */
+var _delTarget = null;
+function deleteRun(id) {
+  _delTarget = id;
+  var run = S.runs.find(function(r) { return r.id === id; });
+  document.getElementById('modalBody').textContent = 'Delete "' + ((run && run.task) || id).substring(0, 50) + '"? 此操作不可恢复。';
+  deleteModal.show();
+}
+async function confirmDelete() {
+  var id = _delTarget; deleteModal.hide();
+  if (!id) return;
+  try {
+    var r = await fetch('/api/fleet-runs/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ run: id }) });
+    var j = await r.json();
+    if (j.ok) {
+      S.runs = S.runs.filter(function(rr) { return rr.id !== id; });
+      if (S.activeRun && S.activeRun.id === id) { S.activeRun = null; S.activeTask = null; }
+      renderRuns(); renderTasks(); renderThink();
+    } else alert('删除失败: ' + (j.error || 'unknown'));
+  } catch (e) { alert('删除失败: ' + e.message); }
+}
+
+/* ============================================================
+   Run report
+   ============================================================ */
+async function renderRunReport() {
+  var el = document.getElementById('think'), sum = document.getElementById('sum'), st = document.getElementById('statBar'), af = document.getElementById('agentFile');
+  if (S.activeTask) { renderThink(); return; }
+  if (!S.activeRun) {
+    el.innerHTML = '<div class="empty text-center py-5"><div class="fs-1 opacity-25">👈</div><div class="small">Select a run</div></div>';
+    sum.classList.add('d-none'); st.classList.add('d-none'); af.classList.add('d-none');
+    return;
+  }
+  sum.classList.remove('d-none'); st.classList.add('d-none'); af.classList.add('d-none');
+  sum.innerHTML = '<b>执行报告</b> <span class="text-secondary ms-2">' + S.activeRun.id + '</span>';
+  try {
+    var r = await fetch('/api/fleet-run-report?run=' + encodeURIComponent(S.activeRun.id));
+    var data = await r.json(), report = data.report || '', analysis = data.analysis || '';
+    var html = '';
+    if (analysis.trim()) { S._analysisCache = analysis; html += '<div class="mb-3"><button class="btn btn-sm btn-outline-info" onclick="showAnalysis()" style="font-size:11px">View Analysis Report</button></div>'; }
+    try {
+      var cr = await fetch('/api/fleet-run-changes?run=' + encodeURIComponent(S.activeRun.id));
+      var cdata = await cr.json(), changes = cdata.changes || {}, fileKeys = Object.keys(changes);
+      if (fileKeys.length > 0) {
+        html += '<div class="card mb-3"><div class="card-hd">📝 Changes (' + fileKeys.length + ' files)</div><div class="card-bd" style="padding:8px">';
+        fileKeys.sort().forEach(function(fp, i) {
+          var ch = changes[fp], ext = fp.split('.').pop();
+          var langMap = { py: 'python', js: 'javascript', ts: 'typescript', vue: 'html', html: 'html', css: 'css', json: 'json', md: 'markdown', go: 'go', rs: 'rust', java: 'java', sh: 'bash' };
+          var lang = langMap[ext] || '', cid = 'chg_' + S.activeRun.id + '_' + i;
+          html += '<div class="cp"><div class="cp-hd" onclick="var b=document.getElementById(\'' + cid + '\');var h=this;b.classList.toggle(\'show\');h.classList.toggle(\'open\');if(b.classList.contains(\'show\')&&typeof hljs!==\'undefined\')hljs.highlightElement(b.querySelector(\'code\'))"><span class="arr">▶</span><span>📄</span><span style="flex:1;font-family:var(--font-mono);font-size:10px">' + fp + ' (' + ch.content.length + 'B)</span><span class="badge br-info" style="font-size:9px">' + ch.agents.join(', ') + '</span></div><div class="cp-bd" id="' + cid + '"><pre><code class="language-' + lang + '">' + ch.content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</code></pre></div></div>';
+        });
+        html += '</div></div>';
+      }
+    } catch (e) {}
+    if (report.trim()) {
+      if (typeof marked !== 'undefined') { marked.setOptions({ breaks: true, gfm: true }); html += '<div class="card"><div class="card-hd">📊 Final Report</div><div class="card-bd md">' + marked.parse(report) + '</div></div>'; }
+      else html += '<div class="card"><div class="card-hd">📊 Final Report</div><div class="card-bd" style="white-space:pre-wrap;font-size:12px;line-height:1.7">' + report.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div></div>';
+    }
+    el.innerHTML = html || '<div class="empty text-center py-5"><div class="fs-1 opacity-25">📋</div><div class="small">No reports yet</div></div>';
+    if (typeof hljs !== 'undefined') setTimeout(function() { hljs.highlightAll(); }, 100);
+  } catch (e) { el.innerHTML = '<div class="empty text-center py-5"><div class="small text-danger">加载失败: ' + e.message + '</div></div>'; }
+}
+
+function showAnalysis() {
+  if (!S._analysisCache) return;
+  var body = document.getElementById('analysisBody');
+  if (typeof marked !== 'undefined') { marked.setOptions({ breaks: true, gfm: true }); body.innerHTML = marked.parse(S._analysisCache); }
+  else body.innerHTML = '<pre style="white-space:pre-wrap;font-size:12px;line-height:1.7">' + S._analysisCache.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre>';
+  new bootstrap.Modal('#analysisModal').show();
+}
+
+/* ============================================================
+   Helpers
+   ============================================================ */
+function statusBadge(status) {
+  var map = { done: 'br-success', executing: 'br-warning', force_stopped: 'br-danger', finishing: 'br-info' };
+  return '<span class="badge ' + (map[status] || 'br-muted') + ' me-1">' + status + '</span>';
+}
+function fmtDuration(sec) {
+  if (!sec || sec < 0) return '';
+  if (sec < 60) return Math.round(sec) + 's';
+  if (sec < 3600) return Math.floor(sec / 60) + 'm' + Math.round(sec % 60) + 's';
+  return Math.floor(sec / 3600) + 'h' + Math.floor((sec % 3600) / 60) + 'm';
+}
+function getRunDuration(r) {
+  if (r.finished_at) return (new Date(r.finished_at) - new Date(r.started_at)) / 1000;
+  if (r.started_at && r.status === 'executing') return (Date.now() - new Date(r.started_at)) / 1000;
+  return null;
+}
+function updatePhaseDots() {
+  if (!S.activeRun) return;
+  var phases = ['init', 'coding', 'testing', 'acceptance', 'done'];
+  var phase = S.activeRun.status === 'done' ? 'done' : (S.activeRun.phase || 'init');
+  var idx = phases.indexOf(phase); if (idx < 0) idx = 0;
+  var dots = document.getElementById('phaseDots').children;
+  for (var i = 0; i < dots.length; i++) {
+    dots[i].className = 'phase-dot';
+    if (i < idx) dots[i].classList.add('done');
+    else if (i === idx) dots[i].classList.add('active');
+  }
+}
+function renderTiming() {
+  var bar = document.getElementById('timingBar'), content = document.getElementById('timingContent');
+  if (!S.activeRun || !S.activeRun.started_at) { bar.classList.add('d-none'); return; }
+  var p = S.activeRun.phases || {}, names = { init: 'Init', coding: 'Code', testing: 'Test', acceptance: 'Accept' };
+  var icons = { init: '🔧', coding: '⚡', testing: '🧪', acceptance: '✅' };
+  var items = [], total = 0;
+  Object.keys(names).forEach(function(k) {
+    var ph = p[k] || {}; if (!ph.start) return;
+    var start = new Date(ph.start), end = ph.end ? new Date(ph.end) : (S.activeRun.status === 'executing' && S.activeRun.phase === k ? new Date() : null);
+    var dur = end ? ((end - start) / 1000) : ((Date.now() - start) / 1000);
+    total += dur;
+    var ds = dur < 60 ? Math.round(dur) + 's' : Math.floor(dur / 60) + 'm' + Math.round(dur % 60) + 's';
+    var cls = ph.end ? 'done' : (S.activeRun.phase === k ? 'active' : '');
+    items.push('<span class="phase-dot ' + cls + '"></span> <b>' + icons[k] + ' ' + names[k] + '</b> <span style="color:var(--' + (ph.end ? 'green' : 'accent') + ')">' + ds + (ph.end ? '' : '...') + '</span>');
+  });
+  if (!items.length) { bar.classList.add('d-none'); return; }
+  bar.classList.remove('d-none');
+  var ts = total < 60 ? Math.round(total) + 's' : Math.floor(total / 60) + 'm' + Math.round(total % 60) + 's';
+  content.innerHTML = '<span style="color:var(--text2)">总耗时 <b style="color:var(--accent)">' + ts + '</b></span> | ' + items.join(' | ');
+}
+
+renderTiming();
+init();
+</script>
+</body>
+</html>

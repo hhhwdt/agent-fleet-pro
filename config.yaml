@@ -1,0 +1,31 @@
+# ============================================================
+# Agent Fleet Configuration
+# Copy to config.local.yaml to override defaults
+# ============================================================
+
+# 管道数据父目录（.fleet/ 会出现在这个目录下）
+# 部署 Dashboard 时改这里，之后不用动
+work_dir: "."
+
+# Dashboard
+port: 8765
+host: "127.0.0.1"
+
+# 管道子目录（相对于 work_dir）
+fleet_dir: ".fleet"
+
+# ============================================================
+# Pipeline Parameters
+# ============================================================
+max_acceptance_rounds: 5
+max_coding_rounds: 10
+agent_timeout_seconds: 300
+parallel_limit: 3
+
+# ============================================================
+# Storage backend (future):
+#   files  - default, everything in .fleet/ (simple, human-readable)
+#   sqlite - run metadata in SQLite, artifacts in .fleet/ (faster scanning)
+# Set via config.local.yaml when you need it
+# storage_backend: files
+# sqlite_path: ".fleet/agent_fleet.db"
