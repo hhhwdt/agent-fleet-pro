@@ -121,7 +121,8 @@ def register_routes(app):
                             try:
                                 with open(full, "r", encoding="utf-8") as fc: changes[fp] = {"agents":[tag],"content":fc.read()}
                             except Exception: changes[fp] = {"agents":[tag],"content":"(binary)"}
-        except Exception: pass
+        except Exception:
+            pass  # git not available, fallback below
         # Fallback to result.md scan
         if not changes:
             base = os.path.join(work_dir, app.config["FLEET_DIR"], run_id)
@@ -140,7 +141,8 @@ def register_routes(app):
                                 try:
                                     with open(full, "r", encoding="utf-8") as fc: changes[fp] = {"agents":[item],"content":fc.read()}
                                 except Exception: changes[fp] = {"agents":[item],"content":"(binary)"}
-                    except Exception: pass
+                    except Exception:
+                        pass  # result.md scan failed, skip
         return jsonify({"run": run_id, "changes": changes})
 
     @app.route("/api/fleet-task-sandbox")
