@@ -5,6 +5,7 @@ from flask import Flask
 from flask_socketio import SocketIO
 
 logger = logging.getLogger("agent_fleet.server")
+logging.basicConfig(level=logging.WARNING, format="[%(name)s] %(levelname)s: %(message)s")
 
 from .api.routes import register_routes
 from .storage import scan_runs
