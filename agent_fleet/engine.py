@@ -302,7 +302,7 @@ class AgentFleet:
                 code_ids = {t["id"] for t in tasks if t.get("type") == "code"}
                 test_ids = {t["id"] for t in tasks if t.get("type") == "test"}
                 done -= code_ids | test_ids
-                done = self._dispatch_type("code", tasks, run_dir)
+                done = self._dispatch_type("code", tasks, run_dir, done)
                 done = self._dispatch_type("test", tasks, run_dir, done)
             else:
                 storage.update_status(run_dir, status="force_stopped")
