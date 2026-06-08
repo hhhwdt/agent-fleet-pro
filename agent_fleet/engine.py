@@ -299,6 +299,25 @@ class AgentFleet:
                 plan = self.planner.plan(task)
         meta = init_pipeline(self.work_dir, self.fleet_dir, task, plan)
         run_dir, tasks = meta["run_dir"], meta["tasks"]
+
+        # Phase 0: Basic analysis (scan project structure, write report)
+        analysis_dir = os.path.join(run_dir, "analysis")
+        os.makedirs(analysis_dir, exist_ok=True)
+        files_found = []
+        for root, _, files in os.walk(self.work_dir):
+            if ".fleet" in root:
+                continue
+            for fn in files:
+                if fn.endswith((".py", ".js", ".ts", ".html", ".css", ".go", ".rs", ".java")):
+                    files_found.append(os.path.relpath(os.path.join(root, fn), self.work_dir))
+        analysis_text = f"## Project Analysis\n\n**Task**: {task}\n\n**Working Directory**: {self.work_dir}\n\n**Existing files** ({len(files_found)}):\n"
+        analysis_text += "\n".join(f"- {f}" for f in files_found[:50])
+        if len(files_found) > 50:
+            analysis_text += f"\n... and {len(files_found) - 50} more"
+        with open(os.path.join(analysis_dir, "requirement-analysis.md"), "w", encoding="utf-8") as f:
+            f.write(analysis_text)
+        storage.append_log(run_dir, "[Phase 0] 项目分析完成")
+
         done = set()  # Global done set — survives across phases
 
         # Phase 2 + 3: coding then testing
@@ -446,6 +465,12 @@ class AgentFleet:
                 if sb_result.stderr:
                     f.write(f"[沙箱错误] {sb_result.stderr[:500]}\n")
 
+        # Validate output quality (SKILL.md standards)
+        issues = self.validate_output(td, task_type)
+        for issue in issues:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"[验证] {issue}\n")
+
         storage.update_status(run_dir,
             agents={tid: {"status": "done" if result["success"] else "failed"}},
             progress={"done": self.stats["tasks"]})
@@ -511,6 +536,31 @@ output.log with fewer than 5 lines = REJECTED.
 ## Working Directory: {work_subdir}
 ## Output Directory: {os.path.join(run_dir, tid)}"""
 
+    @staticmethod
+    def validate_output(task_dir: str, task_type: str) -> list:
+        """Validate agent output against SKILL.md quality standards. Returns list of issues."""
+        issues = []
+        log_file = os.path.join(task_dir, "output.log")
+        if os.path.exists(log_file):
+            with open(log_file, "r", encoding="utf-8") as f:
+                log_lines = [l for l in f.readlines() if l.strip()]
+            if len(log_lines) < 10:
+                issues.append(f"output.log too short ({len(log_lines)} lines, need >=10)")
+        else:
+            issues.append("output.log missing")
+
+        out_map = {"code": ("result.md", 800), "test": ("test-report.md", 1500),
+                    "acceptance": ("acceptance-report.md", 2000)}
+        out_info = out_map.get(task_type, ("result.md", 100))
+        out_file = os.path.join(task_dir, out_info[0])
+        if os.path.exists(out_file):
+            size = os.path.getsize(out_file)
+            if size < out_info[1]:
+                issues.append(f"{out_info[0]} too small ({size}B, need >={out_info[1]}B)")
+        else:
+            issues.append(f"{out_info[0]} missing")
+        return issues
+
     def _run_sandbox(self, run_dir, task_dir):
         """Run coder's generated code in sandbox. Find entry point intelligently."""
         from .sandbox import SandboxResult
@@ -567,49 +617,91 @@ output.log with fewer than 5 lines = REJECTED.
 
 
 def generate_report(run_dir: str, task: str, tasks: list, passed: bool, run_id: str):
-    """Generate FINAL_REPORT.md after pipeline completion."""
+    """Generate FINAL_REPORT.md matching SKILL.md Phase 6 7-section format."""
+    now = datetime.now()
+    ts = now.strftime("%Y-%m-%d %H:%M:%S")
     lines = [
         "# Agent Fleet — Execution Report",
         "",
-        f"**Task**: {task}",
-        f"**Run ID**: {run_id}",
-        f"**Status**: {'PASSED' if passed else 'NOT PASSED'}",
-        f"**Time**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "## 1. Basic Information",
+        f"- **Task**: {task}",
+        f"- **Run ID**: {run_id}",
+        f"- **Status**: {'PASSED' if passed else 'NOT PASSED'}",
+        f"- **Started**: {ts}",
         "",
-        "## Agent Results",
-        "",
-        "| Agent | Type | Output |",
-        "|-------|------|--------|",
+        "## 2. Requirements Analysis Summary",
     ]
+
+    # Read analysis report if exists
+    af = os.path.join(run_dir, "analysis", "requirement-analysis.md")
+    if os.path.exists(af):
+        try:
+            with open(af, "r", encoding="utf-8") as f:
+                lines.append(f.read()[:2000])
+        except Exception:
+            lines.append("(analysis report unavailable)")
+    else:
+        lines.append("(no Phase 0 analysis was generated)")
+
+    lines.append("")
+    lines.append("## 3. Agent Outputs")
+    lines.append("| Agent | Type | Output Files | Status |")
+    lines.append("|-------|------|-------------|--------|")
 
     for t in tasks:
         tid = t["id"]
         tdir = os.path.join(run_dir, tid)
         result_files = []
-        for fn in ["result.md", "test-report.md", "acceptance-report.md"]:
-            if os.path.exists(os.path.join(tdir, fn)):
-                result_files.append(fn)
+        status = "pending"
+        if os.path.isdir(tdir):
+            for fn in ["result.md", "test-report.md", "acceptance-report.md"]:
+                fp = os.path.join(tdir, fn)
+                if os.path.exists(fp) and os.path.getsize(fp) > 100:
+                    result_files.append(fn)
+            if os.path.exists(os.path.join(tdir, "output.log")):
+                status = "completed"
         lines.append(
             f"| {tid} | {t.get('type', 'code')} | "
-            f"{', '.join(result_files) if result_files else 'no output'} |"
+            f"{', '.join(result_files) if result_files else '(no output)'} | {status} |"
         )
 
-    lines.extend(["", "## Files Produced", ""])
-
-    for t in tasks:
-        rf = os.path.join(run_dir, t["id"], "result.md")
-        if os.path.exists(rf):
+    lines.append("")
+    lines.append("## 4. Acceptance Results")
+    acc_files = [os.path.join(run_dir, t["id"], "acceptance-report.md")
+                 for t in tasks if t.get("type") == "acceptance"]
+    for acc_f in acc_files:
+        if os.path.exists(acc_f):
             try:
-                with open(rf, "r", encoding="utf-8") as f:
-                    content = f.read()
-                lines.append(f"### {t['id']}: {t.get('name', '')}")
-                lines.append(f"```\n{content[:500]}\n```\n")
-            except (IOError, UnicodeDecodeError):
-                pass
+                with open(acc_f, "r", encoding="utf-8") as f:
+                    lines.append(f.read()[:2000])
+            except Exception:
+                lines.append(f"Verdict: {'PASS' if passed else 'FAIL'}")
+        else:
+            lines.append(f"Verdict: {'PASS' if passed else 'FAIL'} (no report file)")
+
+    lines.append("")
+    lines.append("## 5. Output File Manifest")
+    for t in tasks:
+        tdir = os.path.join(run_dir, t["id"])
+        if not os.path.isdir(tdir):
+            continue
+        lines.append(f"### {t['id']}: {t.get('name', '')}")
+        for root, _, files in os.walk(tdir):
+            for fn in sorted(files):
+                fp = os.path.join(root, fn)
+                size = os.path.getsize(fp)
+                lines.append(f"- `{os.path.relpath(fp, run_dir)}` ({size} bytes)")
+
+    lines.append("")
+    lines.append("## 6. How to Run")
+    lines.append("(check individual agent output files for run instructions)")
+    lines.append("")
+    lines.append("## 7. Known Issues")
+    lines.append("(none reported)" if passed else "(see acceptance results above)")
 
     report_path = os.path.join(run_dir, "FINAL_REPORT.md")
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
-    storage.append_log(run_dir, f"[报告] FINAL_REPORT.md 已生成")
+    storage.append_log(run_dir, "[报告] FINAL_REPORT.md 已生成")
     return report_path
