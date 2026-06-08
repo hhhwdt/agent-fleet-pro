@@ -66,8 +66,8 @@ class SubprocessAdapter(BaseAgentAdapter):
                 events.append({"ts": now2, "event": "task.failed", "error": result.stderr[:500]})
             out_text = result.stdout
             err_text = result.stderr
-            if len(out_text) > 10000:
-                out_text = out_text[:10000] + f"\n...(truncated, original: {len(result.stdout)} chars)"
+            if len(out_text) > 50000:
+                out_text = out_text[:50000] + f"\n...(truncated, original: {len(result.stdout)} chars)"
             if len(err_text) > 500:
                 err_text = err_text[:500] + f"\n...(truncated, original: {len(result.stderr)} chars)"
             return {"success": ok, "output": out_text, "error": err_text, "events": events}

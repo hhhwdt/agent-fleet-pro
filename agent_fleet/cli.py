@@ -60,12 +60,13 @@ def cmd_resume(args):
     fleet = AgentFleet(config)
     # Re-dispatch incomplete tasks respecting dependency order
     done_ids = set(t["id"] for t in tasks if t["id"] not in set(i["id"] for i in incomplete))
-    fleet._dispatch_type("code", tasks, run_dir, done_ids)
-    fleet._dispatch_type("test", tasks, run_dir, done_ids)
-    fleet._dispatch_type("acceptance", tasks, run_dir, done_ids)
-    update_status(run_dir, status="done", finished_at=datetime.now().isoformat())
-    print(f"Resumed and completed {args.run_id}")
-
+    phase = json.load(open(os.path.join(run_dir, "status.json"), "r", encoding="utf-8")).get("phase", "coding")
+    if phase in ("coding", "code", "init"):
+        fleet._dispatch_type("code", tasks, run_dir, done_ids)
+    if phase in ("testing", "test", "coding", "code"):
+        fleet._dispatch_type("test", tasks, run_dir, done_ids)
+    if phase in ("acceptance", "testing", "test", "coding", "code"):
+        fleet._dispatch_type("acceptance", tasks, run_dir, done_ids)
 
 def cmd_cancel(args):
     """Cancel a running task."""

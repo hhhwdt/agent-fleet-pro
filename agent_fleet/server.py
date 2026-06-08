@@ -24,6 +24,7 @@ def _fleet_watcher():
     fleet_dir = app.config["FLEET_DIR"]
     last_runs_json = ""
     log_mtimes = {}
+_log_mtimes_lock = threading.Lock()
 
     while _watcher_running:
         try:

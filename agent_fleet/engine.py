@@ -609,7 +609,9 @@ output.log with fewer than 5 lines = REJECTED.
         return SandboxResult()
 
     def _check_acceptance(self, run_dir) -> bool:
-        """Check acceptance-report.md for explicit pass verdict."""
+        """Check ALL acceptors — ALL must pass for overall PASS."""
+        import re
+        found_any = False
         for item in os.listdir(run_dir):
             ip = os.path.join(run_dir, item)
             if not os.path.isdir(ip) or not item.startswith("acceptor"):
@@ -617,23 +619,27 @@ output.log with fewer than 5 lines = REJECTED.
             rf = os.path.join(ip, "acceptance-report.md")
             if not os.path.exists(rf):
                 return False
+            found_any = True
             try:
                 with open(rf, "r", encoding="utf-8") as f:
                     text = f.read().lower()
-                # JSON-only verdict detection (case-insensitive for True/False)
-                import re
-                # Match JSON: {"pass": true} or Chinese: {"通过": true}
-                m = re.search(r'(?is)"(?:pass|通过|通过验收)"\s*[：:]\s*(true|false|True|False)', text)
+                # JSON verdict: {"pass": true/false}
+                m = re.search(r'(?is)"(?:pass|通过|通过验收)"\s*[：:]\s*(true|false)', text)
                 if m:
-                    return m.group(1).lower() == "true"
-                # Match VERDICT: PASS (plain text format, case insensitive)
-                if re.search(r'(?i)VERDICT\s*[：:]\s*PASS', text):
-                    return True
+                    if m.group(1).lower() != "true":
+                        return False
+                    continue  # This acceptor passed → check next
+                # VERDICT: FAIL
                 if re.search(r'(?i)VERDICT\s*[：:]\s*FAIL', text):
                     return False
+                # VERDICT: PASS
+                if re.search(r'(?i)VERDICT\s*[：:]\s*PASS', text):
+                    continue  # This acceptor passed → check next
+                # No recognizable signal → fail safe
+                return False
             except Exception:
                 return False
-        return False
+        return found_any
 
 
 def generate_report(run_dir: str, task: str, tasks: list, passed: bool, run_id: str):

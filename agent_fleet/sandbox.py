@@ -46,6 +46,6 @@ class SubprocessSandbox:
 
     def run_script(self, script_path: str, args: list = None,
                    timeout: int = None) -> SandboxResult:
-        cmd = ["python", script_path] + (args or [])
+        cmd = (["node", script_path] if script_path.endswith(".js") else ["go", "run", script_path] if script_path.endswith(".go") else ["cargo", "run", "--manifest-path", script_path] if "Cargo.toml" in script_path else ["python", script_path]) + (args or [])
         return self.execute(cmd, cwd=os.path.dirname(script_path),
                             timeout=timeout or self.timeout)
