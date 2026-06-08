@@ -1,4 +1,4 @@
-"""Sandbox — safely execute agent-generated code and capture results."""
+"""Sandbox — execute agent-generated code with timeout. NOT a security sandbox — runs as current user. For local dev use only."""
 
 import os, subprocess, json, time
 from dataclasses import dataclass

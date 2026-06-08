@@ -367,15 +367,18 @@ class AgentFleet:
             raise ValueError(f"parallel_limit must be 1-100, got {pl}")
 
     def _run(self, task, run_dir) -> bool:
-        """Run one agent and write output to disk. Returns success bool."""
+        """Run one agent with isolated workspace. Returns success bool."""
         import time as _time
         t_start = _time.time()
         tid = task["id"]
         td = os.path.join(run_dir, tid)
+        # Isolated workspace: each agent gets its own subdir to avoid file collisions
+        work_subdir = os.path.join(self.work_dir, f"_{tid}_workspace")
         os.makedirs(td, exist_ok=True)
+        os.makedirs(work_subdir, exist_ok=True)
 
         # Write prompt
-        prompt = self._prompt(task, run_dir)
+        prompt = self._prompt(task, run_dir, work_subdir)
         with open(os.path.join(td, "prompt.md"), "w", encoding="utf-8") as f:
             f.write(prompt)
 
@@ -384,20 +387,23 @@ class AgentFleet:
         with open(log_file, "w", encoding="utf-8") as f:
             f.write(f"[开始] {task['id']}: {task.get('name','')}\n")
 
-        # Execute
+        # Execute — use isolated workspace
         events.append_event(td, "task.started")
-        result = self.adapter.execute(prompt, self.work_dir, td, self.timeout)
+        result = self.adapter.execute(prompt, work_subdir, td, self.timeout)
 
         # Write output to files
+        raw_output = result.get("output", "")
+        if len(raw_output) > 10000:
+            raw_output = raw_output[:10000] + f"\n...(truncated, {len(result.get('output', ''))} chars total)"
         with open(log_file, "a", encoding="utf-8") as f:
-            f.write(result.get("output", "")[:5000] + "\n")
+            f.write(raw_output + "\n")
             f.write(f"[{'完成' if result['success'] else '错误'}] {task['id']}\n")
 
-        # Write result.md for coders
+        # Write result.md for coders (full output, no arbitrary truncation)
         task_type = task.get("type", "code")
         out_file = {"code": "result.md", "test": "test-report.md", "acceptance": "acceptance-report.md"}.get(task_type, "result.md")
         with open(os.path.join(td, out_file), "w", encoding="utf-8") as f:
-            f.write(f"# {task.get('name', tid)}\n\n{result.get('output', '')[:3000]}\n")
+            f.write(f"# {task.get('name', tid)}\n\n{result.get('output', '')}\n")
 
         with self._stats_lock:
             self.stats["durations"].append(_time.time() - t_start)
@@ -419,9 +425,11 @@ class AgentFleet:
             progress={"done": self.stats["tasks"]})
         return result.get("success", False)
 
-    def _prompt(self, task, run_dir):
+    def _prompt(self, task, run_dir, work_subdir=None):
         """Build agent prompt from role file + task info + acceptance criteria."""
         tid = task["id"]
+        if work_subdir is None:
+            work_subdir = self.work_dir
         # Read role file as prompt body
         role_file = os.path.join(run_dir, "roles", f"{tid}.md")
         body = ""
@@ -474,7 +482,7 @@ output.log with fewer than 5 lines = REJECTED.
 {criteria if criteria else 'See plan.json'}
 
 {sandbox_context}
-## Working Directory: {self.work_dir}
+## Working Directory: {work_subdir}
 ## Output Directory: {os.path.join(run_dir, tid)}"""
 
     def _run_sandbox(self, run_dir, task_dir):
@@ -518,7 +526,7 @@ output.log with fewer than 5 lines = REJECTED.
                     text = f.read().lower()
                 # JSON-only verdict detection (case-insensitive for True/False)
                 import re
-                m = re.search(r'(?i)"(?:pass|通过|通过验收)"\s*:\s*(true|false)', text)
+                m = re.search(r'(?is)"(?:pass|通过|通过验收)"\s*[：:]\s*(true|false|True|False)', text)
                 return bool(m) and m.group(1).lower() == "true"
             except Exception:
                 return False

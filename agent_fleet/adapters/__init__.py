@@ -1,7 +1,9 @@
 """Agent adapters — unified interface for different AI agents."""
 
-import abc, os, subprocess, tempfile, shlex
+import abc, os, subprocess, tempfile, shlex, logging
 from datetime import datetime
+
+logger = logging.getLogger("agent_fleet.adapters")
 
 
 class BaseAgentAdapter(abc.ABC):
@@ -71,9 +73,16 @@ class SubprocessAdapter(BaseAgentAdapter):
             return {"success": ok, "output": out_text, "error": err_text, "events": events}
         except subprocess.TimeoutExpired:
             events.append({"ts": datetime.now().isoformat(), "event": "task.failed", "error": f"Timeout ({timeout}s)"})
+            logger.error("SubprocessAdapter: timeout after %ds", timeout)
             return {"success": False, "output": "", "error": f"Timeout ({timeout}s)", "events": events}
+        except FileNotFoundError:
+            msg = f"Command not found: {cmd_list[0]}. Install the CLI (e.g. 'claude') or check agent_command in config.yaml."
+            events.append({"ts": datetime.now().isoformat(), "event": "task.failed", "error": msg})
+            logger.error("SubprocessAdapter: %s", msg)
+            return {"success": False, "output": "", "error": msg, "events": events}
         except Exception as e:
             events.append({"ts": datetime.now().isoformat(), "event": "task.failed", "error": str(e)})
+            logger.error("SubprocessAdapter: unexpected error: %s", e)
             return {"success": False, "output": "", "error": str(e), "events": events}
 
 

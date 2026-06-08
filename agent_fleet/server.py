@@ -1,8 +1,10 @@
 """Agent Fleet Dashboard server — App factory + WebSocket watcher."""
 
-import os, json, time, threading, sys
+import os, json, time, threading, sys, logging
 from flask import Flask
 from flask_socketio import SocketIO
+
+logger = logging.getLogger("agent_fleet.server")
 
 from .api.routes import register_routes
 from .storage import scan_runs
@@ -56,8 +58,10 @@ def _fleet_watcher():
                             with open(lf, "r", encoding="utf-8") as f:
                                 lines = [l.strip() for l in f.readlines() if l.strip()]
                             socketio.emit("task_log", {"run": r["id"], "task": item, "log": lines})
-                    except Exception: pass
-        except Exception: pass
+                    except Exception as e:
+                        logger.warning("watcher: log check failed: %s", e)
+        except Exception as e:
+            logger.error("watcher: scan failed: %s", e)
         time.sleep(2)
 
 
