@@ -200,10 +200,10 @@ Both appear in the **same Dashboard**, running independently.
 ### Python API (without Claude Code)
 
 ```python
-from agent_fleet import init_pipeline, decompose_task, generate_report
+from agent_fleet import init_pipeline, decomposition_prompt, generate_report
 
 meta = init_pipeline("./my-project", ".fleet", "Build a calculator")
-print(decompose_task("Build a calculator"))
+print(decomposition_prompt("Build a calculator"))
 # Send to your agent. Write output.log + result.md per task.
 # Dashboard auto-detects.
 ```
