@@ -25,11 +25,11 @@ class MockAdapter(BaseAgentAdapter):
         events.append({"ts": now, "event": "task.started"})
         events.append({"ts": now, "event": "task.progress", "msg": f"Received {len(prompt)} chars prompt"})
         events.append({"ts": now, "event": "task.completed"})
-        # Write acceptance-friendly output for testability
-        output = "[Mock] Task completed\n"
-        # Only write verdict for actual acceptance tasks, not planning prompts
+        base = "[Mock] Task completed successfully.\n\n## Output\n\n"
+        pad = "Mock execution output line for validation.\n" * 60
+        output = base + pad
         if task_type == "acceptance":
-            output += '## VERDICT\n```json\n{"pass": true, "evidence": ["all criteria satisfied"]}\n```'
+            output += '\n## VERDICT\n```json\n{"pass": true, "evidence": ["all criteria satisfied"]}\n```\n'
         return {"success": True, "output": output, "error": "", "events": events}
 
 

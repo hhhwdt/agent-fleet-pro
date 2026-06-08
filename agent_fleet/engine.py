@@ -344,8 +344,10 @@ class AgentFleet:
                 storage.append_log(run_dir, f"[验收] 第{rnd}轮: 不通过，进入修复")
                 self.stats["retries"] += 1
                 # Fix round: only reset FAILED agents (not all code+test)
-                failed_ids = {tid for tid, count in self.stats["failures"].items() if count > 0}
-                done -= failed_ids  # Only reset agents that actually failed
+                # Only reset agents that failed but haven't exceeded max retries (3)
+                failed_ids = {tid for tid, count in self.stats["failures"].items()
+                              if 0 < count < 3}
+                done -= failed_ids
                 done = self._dispatch_type("code", tasks, run_dir, done)
                 done = self._dispatch_type("test", tasks, run_dir, done)
             else:
@@ -518,7 +520,16 @@ class AgentFleet:
                 plan = json.load(f)
             ac = plan.get("acceptance_criteria", [])
             if ac:
-                criteria = "\n".join(f"{i+1}. {c}" for i, c in enumerate(ac))
+                lines = []
+                for i, c in enumerate(ac):
+                    if isinstance(c, dict):
+                        desc = c.get("描述", c.get("description", str(c)))
+                        inp = c.get("输入", c.get("verify", ""))
+                        exp = c.get("期望", "")
+                        lines.append(f"{i+1}. {desc}\n   输入: {inp}\n   期望: {exp}")
+                    else:
+                        lines.append(f"{i+1}. {c}")
+                criteria = "\n".join(lines)
 
         header = {
             "code": "Write only implementation code. Do NOT write tests.",
