@@ -1,16 +1,20 @@
-"""Agent Fleet — Pipeline manager (no agent execution).
+"""Agent Fleet — Pipeline infrastructure (orchestration is in SKILL.md).
 
-Agent Fleet is NOT an agent. It's the CI/CD pipeline + dashboard that sits
-on top of whatever AI agent you use (Claude Code, Cursor, Codex, OpenCode, etc.).
+Agent Fleet is NOT an agent. It's the file I/O + state management + Dashboard
+that supports multi-agent pipelines.
+
+IMPORTANT: The full orchestration logic (Phase 0-6 with quality gates, retry
+penalties, cross-validation, prompt templates) lives in SKILL.md — a Claude Code
+skill that Claude interprets at runtime. engine.py provides the Python
+infrastructure: plan/status/progress file I/O, adapter dispatch, report generation.
+For the complete pipeline experience, use /agent-fleet-pro in Claude Code.
 
 It handles:
   - Task decomposition (split requirements into code/test/accept subtasks)
   - Pipeline state management (plan.json / status.json / progress.log)
   - Report generation (FINAL_REPORT.md)
   - Web dashboard for real-time monitoring
-
-Your agent does the actual coding/testing/acceptance work. Agent Fleet tells
-it WHAT to do and shows you the big picture.
+  - Topology loading for custom pipeline stages
 """
 
 import os, json, yaml, threading
@@ -256,13 +260,21 @@ class AgentFleet:
             count_max = int(count_str.split("-")[-1]) if "-" in count_str else int(count_str)
             for i in range(count_max):
                 tid = f"{sid}-{i+1:02d}" if count_max > 1 else f"{sid}-01"
+                deps = []
+                for d in stage.get("depends_on", []):
+                    for other in topo.get("stages", []):
+                        if other["id"] == d:
+                            dc = str(other.get("count", "1"))
+                            dm = int(dc.split("-")[-1]) if "-" in dc else int(dc)
+                            deps.extend(f"{d}-{j+1:02d}" for j in range(dm))
+                            break
+                    if not deps:
+                        deps.append(f"{d}-01")
                 tasks.append({
-                    "id": tid,
-                    "type": sid,
+                    "id": tid, "type": sid,
                     "name": f"{sid} #{i+1}" if count_max > 1 else sid,
                     "responsibility": stage.get("role", f"Execute {sid} stage"),
-                    "expected_files": [],
-                    "depends_on": [f"{d}-01" for d in stage.get("depends_on", [])],
+                    "expected_files": [], "depends_on": deps,
                 })
         return {
             "summary": task[:80],
