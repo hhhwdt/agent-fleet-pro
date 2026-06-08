@@ -76,7 +76,8 @@ Return ONLY valid JSON:
 }}"""
 
         plan_dir = os.path.join(tempfile.gettempdir(), "agent_fleet_plan")
-        result = self.adapter.execute(prompt, ".", plan_dir, 120)
+        os.makedirs(plan_dir, exist_ok=True)
+        result = self.adapter.execute(prompt, plan_dir, plan_dir, 120)
         if result.get("success") and result.get("output"):
             text = result["output"].strip()
             # Extract JSON from response
@@ -102,7 +103,7 @@ class DocAwarePlanner(LLMPlanner):
             if os.path.isfile(task):
                 try:
                     with open(task, "r", encoding="utf-8") as f:
-                        ctx["analysis"] = f"## Document: {task}\n\n{f.read()[:3000]}"
+                        ctx["analysis"] = f"## Document: {task}\n\n{f.read(10000)}"  # limit to 10KB
                 except Exception as e:
                     logger.warning("DocAwarePlanner: failed to read %s: %s", task, e)
             else:

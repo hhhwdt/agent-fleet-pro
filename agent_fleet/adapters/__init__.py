@@ -11,7 +11,7 @@ class BaseAgentAdapter(abc.ABC):
 
     @abc.abstractmethod
     def execute(self, prompt: str, work_dir: str, task_dir: str,
-                timeout: int = 300) -> dict:
+                timeout: int = 300, task_type: str = "code") -> dict:
         """Execute an agent. Returns {success, output, error, events}."""
         ...
 
@@ -19,7 +19,7 @@ class BaseAgentAdapter(abc.ABC):
 class MockAdapter(BaseAgentAdapter):
     """Mock adapter for testing — echoes prompt back."""
 
-    def execute(self, prompt, work_dir, task_dir, timeout=300):
+    def execute(self, prompt, work_dir, task_dir, timeout=300, task_type="code"):
         events = []
         now = datetime.now().isoformat()
         events.append({"ts": now, "event": "task.started"})
@@ -28,7 +28,7 @@ class MockAdapter(BaseAgentAdapter):
         # Write acceptance-friendly output for testability
         output = "[Mock] Task completed\n"
         # Only write verdict for actual acceptance tasks, not planning prompts
-        if prompt.strip().startswith("Task: acceptor") or "acceptance-report.md" in prompt:
+        if task_type == "acceptance":
             output += '## VERDICT\n```json\n{"pass": true, "evidence": ["all criteria satisfied"]}\n```'
         return {"success": True, "output": output, "error": "", "events": events}
 
@@ -41,7 +41,7 @@ class SubprocessAdapter(BaseAgentAdapter):
             raise ValueError("agent_command must contain '{prompt_file}' placeholder")
         self.command = command
 
-    def execute(self, prompt, work_dir, task_dir, timeout=300):
+    def execute(self, prompt, work_dir, task_dir, timeout=300, task_type="code"):
         events = []
         now = datetime.now().isoformat()
         events.append({"ts": now, "event": "task.started"})
@@ -51,8 +51,8 @@ class SubprocessAdapter(BaseAgentAdapter):
         os.makedirs(task_dir, exist_ok=True)
 
         try:
-            cmd = self.command.replace("{prompt_file}", prompt_file)
-            cmd_list = shlex.split(cmd)
+            # Split template first, then replace — avoids breaking on spaces in paths
+            cmd_list = [prompt_file if arg == "{prompt_file}" else arg for arg in shlex.split(self.command)]
             result = subprocess.run(
                 cmd_list, cwd=work_dir, shell=False,
                 capture_output=True, text=True,

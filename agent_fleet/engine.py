@@ -173,7 +173,16 @@ def init_pipeline(work_dir: str, fleet_dir: str, task: str,
 
     # Write role prompt files
     criteria = plan.get("acceptance_criteria", [])
-    criteria_text = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(criteria))
+    criteria_lines = []
+    for i, c in enumerate(criteria):
+        if isinstance(c, dict):
+            desc = c.get('描述', c.get('description', ''))
+            inp = c.get('输入', c.get('verify', ''))
+            exp = c.get('期望', '')
+            criteria_lines.append(f"  {i+1}. {desc}\n     输入: {inp}\n     期望: {exp}")
+        else:
+            criteria_lines.append(f"  {i+1}. {c}")
+    criteria_text = "\n".join(criteria_lines)
 
     for t in meta["tasks"]:
         tp = t.get("type", "code")
@@ -392,9 +401,10 @@ class AgentFleet:
         with open(log_file, "w", encoding="utf-8") as f:
             f.write(f"[开始] {task['id']}: {task.get('name','')}\n")
 
-        # Execute — use isolated workspace
+        # Execute — use isolated workspace, pass task type for mock adapter
+        task_type = task.get("type", "code")
         events.append_event(td, "task.started")
-        result = self.adapter.execute(prompt, work_subdir, td, self.timeout)
+        result = self.adapter.execute(prompt, work_subdir, td, self.timeout, task_type=task_type)
 
         # Write output to files
         raw_output = result.get("output", "")
@@ -405,7 +415,6 @@ class AgentFleet:
             f.write(f"[{'完成' if result['success'] else '错误'}] {task['id']}\n")
 
         # Write result.md for coders (full output, no arbitrary truncation)
-        task_type = task.get("type", "code")
         out_file = {"code": "result.md", "test": "test-report.md", "acceptance": "acceptance-report.md"}.get(task_type, "result.md")
         with open(os.path.join(td, out_file), "w", encoding="utf-8") as f:
             f.write(f"# {task.get('name', tid)}\n\n{result.get('output', '')}\n")
