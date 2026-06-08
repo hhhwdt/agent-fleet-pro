@@ -343,10 +343,9 @@ class AgentFleet:
             if rnd < self.max_accept:
                 storage.append_log(run_dir, f"[验收] 第{rnd}轮: 不通过，进入修复")
                 self.stats["retries"] += 1
-                # Fix round: remove code/test tasks from done so they re-run
-                code_ids = {t["id"] for t in tasks if t.get("type") == "code"}
-                test_ids = {t["id"] for t in tasks if t.get("type") == "test"}
-                done -= code_ids | test_ids
+                # Fix round: only reset FAILED agents (not all code+test)
+                failed_ids = {tid for tid, count in self.stats["failures"].items() if count > 0}
+                done -= failed_ids  # Only reset agents that actually failed
                 done = self._dispatch_type("code", tasks, run_dir, done)
                 done = self._dispatch_type("test", tasks, run_dir, done)
             else:
@@ -465,16 +464,26 @@ class AgentFleet:
                 if sb_result.stderr:
                     f.write(f"[沙箱错误] {sb_result.stderr[:500]}\n")
 
-        # Validate output quality (SKILL.md standards)
+        # Validate output quality — failures override agent success
         issues = self.validate_output(td, task_type)
         for issue in issues:
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"[验证] {issue}\n")
 
+        # Output validation failure → agent is NOT done, can be retried
+        agent_ok = result.get("success", False) and not issues
+        if issues:
+            events.append_event(td, "task.failed", error=f"output validation: {len(issues)} issues")
+            self.stats["failures"][tid] = self.stats["failures"].get(tid, 0) + 1
+            # Max 2 retries (SKILL.md standard)
+            if self.stats["failures"][tid] >= 3:
+                events.append_event(td, "task.failed", error="max retries (3) exceeded")
+                agent_ok = True  # Mark as "done" anyway to avoid infinite loop
+
         storage.update_status(run_dir,
-            agents={tid: {"status": "done" if result["success"] else "failed"}},
+            agents={tid: {"status": "done" if agent_ok else "failed"}},
             progress={"done": self.stats["tasks"]})
-        return result.get("success", False)
+        return agent_ok
 
     def _prompt(self, task, run_dir, work_subdir=None):
         """Build agent prompt from role file + task info + acceptance criteria."""
