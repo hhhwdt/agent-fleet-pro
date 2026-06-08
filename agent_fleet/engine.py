@@ -112,7 +112,12 @@ def simple_plan(task: str) -> dict:
     """Generate a minimal 1-coder plan without calling an agent."""
     return {
         "summary": task[:80],
-        "acceptance_criteria": ["Code runs without errors", "Meets requirements"],
+        "acceptance_criteria": [
+            {"id": "ac-1", "描述": "核心功能正常执行",
+             "输入": f"正常调用 {task[:30]}", "期望": "返回预期结果，无异常"},
+            {"id": "ac-2", "描述": "边界输入不崩溃",
+             "输入": "空值/0/-1/超长字符串", "期望": "返回明确错误信息，不静默崩溃"},
+        ],
         "tasks": [
             {"id": "coder-01", "type": "code", "name": "Main Implementation",
              "responsibility": f"Implement: {task}", "expected_files": [], "depends_on": []},
@@ -526,8 +531,15 @@ output.log with fewer than 5 lines = REJECTED.
                     text = f.read().lower()
                 # JSON-only verdict detection (case-insensitive for True/False)
                 import re
+                # Match JSON: {"pass": true} or Chinese: {"通过": true}
                 m = re.search(r'(?is)"(?:pass|通过|通过验收)"\s*[：:]\s*(true|false|True|False)', text)
-                return bool(m) and m.group(1).lower() == "true"
+                if m:
+                    return m.group(1).lower() == "true"
+                # Match VERDICT: PASS (plain text format, case insensitive)
+                if re.search(r'(?i)VERDICT\s*[：:]\s*PASS', text):
+                    return True
+                if re.search(r'(?i)VERDICT\s*[：:]\s*FAIL', text):
+                    return False
             except Exception:
                 return False
         return False

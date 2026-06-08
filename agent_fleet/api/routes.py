@@ -33,7 +33,7 @@ def register_routes(app):
 
     @app.after_request
     def _cors(response):
-        response.headers["Access-Control-Allow-Origin"] = app.config.get("CORS_ORIGINS", "http://localhost:*")
+        response.headers["Access-Control-Allow-Origin"] = app.config.get("CORS_ORIGINS", "http://127.0.0.1:8765")
         response.headers["Access-Control-Allow-Headers"] = "Content-Type"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
         return response

@@ -11,7 +11,7 @@ from .api.routes import register_routes
 from .storage import scan_runs
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(app, cors_allowed_origins=["http://127.0.0.1:8765", "http://localhost:8765"], async_mode="threading")
 register_routes(app)
 
 _watcher_running = False
